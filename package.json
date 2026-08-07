@@ -1,0 +1,10 @@
+{
+  "name": "moose-coding-legion",
+  "version": "0.1.0",
+  "description": "An operating system for shipping software with AI agents - the rules, patterns and runnable checks, written from the incidents that taught them.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "proof": "node proof/run.mjs"
+  }
+}
