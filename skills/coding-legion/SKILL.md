@@ -24,6 +24,13 @@ adaptations):
   the fallback ledger — weaker across crashes, still workable.
 
 ## Phase 0 — Preconditions
+- **A running local dev instance** (the app on localhost + its backend
+  dev deployment). Lane evidence and the integration gate both verify
+  against the LIVE app — without a server, verification degrades to
+  typecheck-only and the run must say so explicitly in its summary.
+  The orchestrator owns the server: start it before wave 1, health-check
+  it between waves (a wedged dev server serves blank shells that look
+  like code bugs), and restart it after dependency changes.
 - A written plan exists from the PLANNER, or the task is mechanical enough
   that sharding is bookkeeping, not design. When in doubt: plan first.
 - Working tree clean enough to attribute lane diffs.
@@ -98,6 +105,11 @@ Keep the plan file until the run ships; it is the post-mortem record.
   themselves.
 - One repo, one legion: don't blend plans, reviewers, or state across
   repositories.
+- **Never install/update packages while the dev server runs** — a live
+  watcher holding files during an install corrupts the dependency tree
+  in ways that surface as unrelated runtime failures. Stop the server,
+  install, restart. Any lane needing a dependency change must hand that
+  step back to the orchestrator between waves.
 - If Claude Code's native Agent Teams are enabled in your build, prefer
   them for the spawn layer — this doctrine (plan file, leases, waves,
   evidence, review) is unchanged; only the launch mechanism differs.
