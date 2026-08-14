@@ -8,7 +8,7 @@ description: Parallel agent swarm for the Legion repo — shard a Codex (Brain) 
 The swarm layer executes a **Codex plan** in parallel. It never invents
 architecture (that stays the Brain's job — `docs/BRAIN_AND_MUSCLE.md`) and
 never ships unreviewed (the merged diff still goes through `npm run muscle`).
-Pipeline: **Codex plans → this session orchestrates → LoopX persists → 
+Pipeline: **Codex plans → this session orchestrates → LoopX persists →
 subagent lanes execute → integration gate → Codex reviews.**
 
 Synthesized from ClawTeam (worker/lease protocol), am-will/swarms (plan-file
@@ -16,6 +16,13 @@ state machine, waves, context packs), affaan-m/claude-swarm (quality gate,
 file-disjoint sharding), and Anthropic's native Agent Teams protocol shapes.
 
 ## Phase 0 — Preconditions
+- **A running local dev instance** (the app on localhost + its backend
+  dev deployment). Lane evidence and the integration gate both verify
+  against the LIVE app — without a server, verification degrades to
+  typecheck-only and the run must say so explicitly in its summary.
+  The orchestrator owns the server: start it before wave 1, health-check
+  it between waves (a wedged dev server serves blank shells that look
+  like code bugs), and restart it after dependency changes.
 - A Brain plan exists (`npm run brain "…"` output) OR the task is mechanical
   enough that sharding is bookkeeping, not design. When in doubt: Brain first.
 - Working tree is clean enough to attribute lane diffs (commit or stash noise).
@@ -84,6 +91,11 @@ goal. Delete `.codex/swarm/<run-id>.md` only after the run ships; it is the
 post-mortem record until then.
 
 ## Hard rules
+- **UI work is verified by PIXELS, not payloads.** SSR HTML containing the
+  right text, HTTP 200s, and a populated DOM all coexist with a blank
+  screen (opaque overlays, stacking contexts, hydration wipes). Any lane
+  or gate that touches user-visible UI must capture a headless-browser
+  screenshot (e.g. Playwright) and LOOK at it before claiming done.
 - The orchestrator (this session) NEVER does lane work itself while a wave
   runs — it launches, monitors, verifies, reconciles (OpenSwarm's one good
   rule). Solo work resumes only between waves or for the integration gate.
@@ -91,6 +103,11 @@ post-mortem record until then.
   themselves.
 - Legion-only: do not blend with another repo's brain/muscle/LoopX. The
   WeatherOps repo has its own copy of this skill wired to its own stack.
+- **Never install/update packages while the dev server runs** — a live
+  watcher holding files during an install corrupts the dependency tree
+  in ways that surface as unrelated runtime failures. Stop the server,
+  install, restart. Any lane needing a dependency change must hand that
+  step back to the orchestrator between waves.
 - If Claude Code's native Agent Teams are enabled in your build
   (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`), prefer them for the spawn layer
   — this doctrine (plan file, leases, waves, evidence, review) is unchanged;
