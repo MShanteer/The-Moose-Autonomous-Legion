@@ -65,7 +65,7 @@ never does lane work").
 
 ## The eleven invariants
 
-1. Plan file as the shared state machine (, canonical file
+1. Plan file as the shared state machine (`depends_on`, canonical file
    lists, writable status/log per lane)
 2. The session that sharded the plan launches and verifies the waves
 3. Context packs with canonical naming — workers may not invent paths
@@ -84,13 +84,14 @@ never does lane work").
     model family strengthens Phase 5, but only after it passes a
     seeded-bug test (hand it a diff whose ground-truth defect a trusted
     reviewer already caught; measure catch/miss/hallucination). See
-    . Secondary reviewers never gate
-    shipping alone.
+    [`tools/nim-review.example.sh`](tools/nim-review.example.sh).
+    Secondary reviewers never gate shipping alone.
 
 ## Tools
 
- — pipe your working diff to a free
-NVIDIA NIM-hosted model as a second reviewer (~5s with z-ai/glm-5.2).
+[`tools/nim-review.example.sh`](tools/nim-review.example.sh) — pipe your
+working diff to a free NVIDIA NIM-hosted model as a second reviewer
+(~5s with z-ai/glm-5.2).
 Generic version of the script running in production at MTS; bring your
 own key from build.nvidia.com.
 
