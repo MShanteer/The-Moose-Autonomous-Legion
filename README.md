@@ -63,7 +63,7 @@ protocol, dependency auto-unblock),
 [VRSEN/OpenSwarm](https://github.com/VRSEN/OpenSwarm) ("the orchestrator
 never does lane work").
 
-## The eleven invariants
+## The ten invariants
 
 1. Plan file as the shared state machine (`depends_on`, canonical file
    lists, writable status/log per lane)
@@ -80,20 +80,6 @@ never does lane work").
 10. UI work is verified by PIXELS — a headless-browser screenshot you
     actually look at; SSR text, HTTP 200s, and a populated DOM all coexist
     with a blank screen
-11. Reviewer diversity, auditioned — a second reviewer from a different
-    model family strengthens Phase 5, but only after it passes a
-    seeded-bug test (hand it a diff whose ground-truth defect a trusted
-    reviewer already caught; measure catch/miss/hallucination). See
-    [`tools/nim-review.example.sh`](tools/nim-review.example.sh).
-    Secondary reviewers never gate shipping alone.
-
-## Tools
-
-[`tools/nim-review.example.sh`](tools/nim-review.example.sh) — pipe your
-working diff to a free NVIDIA NIM-hosted model as a second reviewer
-(~5s with z-ai/glm-5.2).
-Generic version of the script running in production at MTS; bring your
-own key from build.nvidia.com.
 
 ## License
 

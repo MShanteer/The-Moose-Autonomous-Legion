@@ -90,13 +90,6 @@ live checks. Cross-lane breakage is the orchestrator's to reconcile, not a
 lane's.
 
 ## Phase 5 — Review
-A SECOND reviewer of a different model family strengthens this phase when
-available (reviewer diversity catches what one family normalizes) — e.g. a
-free NVIDIA NIM-hosted model piped the same diff. Audition new reviewers
-with a SEEDED-BUG test first: hand them a diff whose ground-truth defect a
-trusted reviewer already caught, and measure catch/miss/hallucination
-before trusting their verdicts. Secondary reviewers never gate shipping
-alone; the orchestrator adjudicates disagreements.
 Hand the COMBINED diff to the REVIEWER. Fix findings (small: inline;
 large: one fix-lane per finding cluster). Iterate until clean — then your
 normal deploy discipline.
