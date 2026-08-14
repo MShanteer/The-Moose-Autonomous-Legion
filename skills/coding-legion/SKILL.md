@@ -99,6 +99,11 @@ Complete each lane in the state layer with evidence + a run summary.
 Keep the plan file until the run ships; it is the post-mortem record.
 
 ## Hard rules
+- **UI work is verified by PIXELS, not payloads.** SSR HTML containing the
+  right text, HTTP 200s, and a populated DOM all coexist with a blank
+  screen (opaque overlays, stacking contexts, hydration wipes). Any lane
+  or gate that touches user-visible UI must capture a headless-browser
+  screenshot (e.g. Playwright) and LOOK at it before claiming done.
 - The orchestrator NEVER does lane work while a wave runs — it launches,
   monitors, verifies, reconciles. Solo work resumes between waves.
 - Secrets never enter the plan file or lane prompts — lanes read env
