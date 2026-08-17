@@ -54,10 +54,18 @@ timeout 75 codex exec --ephemeral -m <model> "Reply with exactly: OK" < /dev/nul
 Then curl the same model on `/chat/completions`. If curl passes and the CLI
 loops, it's the transport, not the model.
 
-**Keep an escape hatch.** A ~100-line script that POSTs to `/chat/completions`
+**Keep an escape hatch.** A ~150-line script that POSTs to `/chat/completions`
 reaches every model your gateway offers. It has no file access, which makes it
 useless for planning — and perfect for review, where the input is a diff and
 the output is findings. See [`scripts/zen.mjs`](../scripts/zen.mjs).
+
+> **Stream it.** Node's global `fetch` (undici) enforces a **~300s headers
+> timeout**. A reasoning model given a real diff can take longer than that to
+> emit its first byte, and the request dies with `UND_ERR_HEADERS_TIMEOUT` — an
+> unhandled `TypeError`, not an API error. Short test prompts return in seconds
+> and never hit it, so this passes every smoke test and fails on the first real
+> workload. A streamed response returns headers immediately and never trips it.
+> Ours shipped with this bug and hit it on its first genuine review.
 
 This matters more than convenience. Most models one CLI can reach tend to come
 from a single vendor family, so a review by "another model" is often the same
@@ -156,14 +164,72 @@ let it read them**, including the base revision for comparison
 
 ---
 
-## Trap 5 — the reviewer must not be the author
+## Trap 5 — one goal per call; a multi-part prompt gets narrated, not executed
+
+A headless agent reliably **executes one goal** and reliably **narrates several**.
+Handed a seven-part audit, ours read the rules file, described its plan —
+*"reading the files, diffing against the baseline, then querying MCP…
+Proceeding now."* — and ended the turn. Exit 0. No tool calls. The same agent,
+same model, same config, given **one** of those seven questions, read both files
+end to end and answered with line numbers.
+
+This is about prompt *shape*, not prompt *wording*. Adding "do not write a
+preamble" helps and is worth putting in your runner permanently, but it does not
+survive a long enough prompt. Decompose instead: one question per call, run them
+in parallel, synthesize after.
+
+That decomposition is what Legion's lanes already are. Apply it to your planner,
+not just your workers.
+
+---
+
+## Trap 6 — the reviewer must not be the author
 
 If PLANNER and REVIEWER are the same model, the review is theatre — a model
-re-reading its own reasoning agrees with itself. Equally, a reviewer *weaker*
-than the author will miss what the author got wrong.
+re-reading its own reasoning agrees with itself. A reviewer *weaker* than the
+author will miss what the author got wrong. Same weight class, different model,
+different vendor lineage where your transport allows it (Trap 1).
 
-Same weight class, different model. Different vendor lineage if your transport
-allows it (see Trap 1).
+**This is not a stylistic preference. A worked example, 2026-08-17:**
+
+A permission change governed which reps could send from a company's business
+phone number — live system, real customers. The codex-family reviewer traced
+both routes and returned **FAIL-CLOSED, safe to ship**, with supporting line
+numbers.
+
+The same diff, same moment, to `claude-opus-5` through `zen`: **four ship
+blockers**, including one the first reviewer's trace had walked straight past —
+the entire gate sat inside `if (manualMode)`, so a whole class of request never
+reached it.
+
+Independent verification against the source proved the second reviewer right.
+It also found that the flaw had been *introduced by a previous fix*, written
+against a misdiagnosis, carrying a provably dead code branch — the dead branch
+being direct evidence the code did not do what its own comment claimed.
+
+One lineage checking its own class of mistake is not a second opinion. The
+disagreement between the two reviewers was worth more than either verdict.
+
+---
+
+## Trap 7 — verify the guard, in both directions
+
+After fixing that bug we added a regression test. The **first two versions of
+the test were themselves broken**:
+
+1. Regex escaping mangled by shell quoting — and a broken *negative* regex
+   reports a false **PASS**, the one failure mode a guard must never have.
+2. Substring checks inside a fixed-width window — which passed on the buggy
+   revision, because the broken chain *contained the correct one as a dead
+   branch*, and the window truncated mid-expression.
+
+Both looked green against fixed code. Neither would have caught the bug.
+
+**Mutation-test every guard.** Run it against the revision that still has the
+defect and confirm it FAILS; run it against the fix and confirm it PASSES. A
+guard that has never seen the bug is an assumption wearing a test's clothing.
+`git show <buggy-rev>:<path>` makes this cheap — no need to reintroduce the
+defect.
 
 ---
 

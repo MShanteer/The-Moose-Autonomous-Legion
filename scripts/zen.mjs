@@ -80,47 +80,74 @@ if (!prompt.trim()) {
   process.exit(1);
 }
 
-// 5xx from a shared gateway is usually transient capacity, not a dead model —
-// two models 503'd and then passed on retry during testing.
+// STREAMING IS NOT OPTIONAL — it is the fix for a real failure.
+//
+// Node's global fetch (undici) enforces a ~300s HEADERS timeout. A reasoning
+// model given a large diff can take longer than that to produce its first
+// byte, and the request dies with UND_ERR_HEADERS_TIMEOUT — an unhandled
+// TypeError, not an API error. Short prompts return fast and never hit it, so
+// this hides until the first real workload.
+//
+// A streamed response sends headers immediately and keeps the connection
+// alive, so the headers timeout never applies. It also prints as it generates,
+// which matters when a review takes minutes.
 async function call(attempt = 1) {
   const res = await fetch(`${BASE}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], stream: true }),
   });
 
+  // Transient capacity, not a dead model — two models 503'd then passed on retry.
   if (res.status >= 500 && attempt < 4) {
     console.error(`[zen] ${model} HTTP ${res.status}, retry ${attempt}/3…`);
     await new Promise((r) => setTimeout(r, 2000 * attempt));
     return call(attempt + 1);
   }
 
-  const text = await res.text();
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    console.error(`[zen] ${model} HTTP ${res.status}: unparseable response`);
-    console.error(text.slice(0, 500));
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`[zen] ${model} HTTP ${res.status}: ${body.slice(0, 400)}`);
     process.exit(1);
   }
 
-  if (!res.ok || json.error) {
-    console.error(`[zen] ${model} HTTP ${res.status}: ${json.error?.message ?? text.slice(0, 300)}`);
-    process.exit(1);
+  let buf = "";
+  let wrote = 0;
+  let usage = null;
+
+  for await (const chunk of res.body) {
+    buf += Buffer.from(chunk).toString("utf8");
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? ""; // keep the partial line for the next chunk
+
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith("data:")) continue;
+      const payload = t.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      let j;
+      try {
+        j = JSON.parse(payload);
+      } catch {
+        continue; // partial or keep-alive frame
+      }
+      if (j.usage) usage = j.usage;
+      const d = j.choices?.[0]?.delta;
+      // Some models stream the answer as reasoning_content and leave content empty.
+      const piece = d?.content || d?.reasoning_content;
+      if (piece) {
+        process.stdout.write(piece);
+        wrote += piece.length;
+      }
+    }
   }
 
-  const msg = json.choices?.[0]?.message;
-  // Some models return the answer in `reasoning_content` and leave `content`
-  // empty — print something real instead of "undefined".
-  const out = msg?.content || msg?.reasoning_content;
-  if (!out) {
-    console.error(`[zen] ${model} returned no content. Raw message:`);
-    console.error(JSON.stringify(msg).slice(0, 500));
+  process.stdout.write("\n");
+  if (!wrote) {
+    console.error(`[zen] ${model} streamed no content — treat this as a FAILED run, not an empty finding.`);
     process.exit(1);
   }
-  console.log(out);
-  if (json.usage) console.error(`[zen] ${model} · ${json.usage.total_tokens} tokens`);
+  if (usage) console.error(`[zen] ${model} · ${usage.total_tokens} tokens`);
 }
 
 await call();
