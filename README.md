@@ -23,7 +23,7 @@ Copy the skill into your repo's Claude Code skills directory:
 
 ```bash
 mkdir -p .claude/skills/coding-legion
-curl -fsSL https://raw.githubusercontent.com/MShanteer/The-Moose-Autonomous-Legion/main/skills/coding-legion/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/MShanteer/The-Moose-Autonomous-Legion/master/skills/coding-legion/SKILL.md \
   -o .claude/skills/coding-legion/SKILL.md
 ```
 
@@ -48,6 +48,50 @@ See [`examples/`](examples/) for the two production adaptations
 (a Convex/Next.js CRM and a large SaaS monorepo) showing repo-specific
 wiring: deploy discipline, context briefs, goal ids, and a cheap-worker
 dispatch lane.
+
+## Wiring the PLANNER — read this before you trust it
+
+**[`docs/PLANNER_SETUP.md`](docs/PLANNER_SETUP.md)** — the part nobody warns
+you about. Legion is only as good as the engine that plans and reviews, and
+that wiring fails *silently*:
+
+> **An empty run that exits 0 is the default failure mode.** Four unrelated
+> causes all produce a clean exit code, no findings, and a pipeline that
+> believes it was reviewed.
+
+Documented with the evidence from breaking each one in production:
+
+1. **The model is fine, the transport is broken.** Your CLI speaks one wire
+   protocol; the gateway advertises many models. Models that fail through the
+   CLI return clean answers over `/chat/completions` with the same key.
+   [`scripts/zen.mjs`](scripts/zen.mjs) is the escape hatch — and the only way
+   to get a reviewer from a different vendor lineage than the author.
+2. **MCP tool calls cancelled by a user who isn't there.** Headless runs can't
+   answer an approval prompt, so tools "fail" and the agent silently falls back
+   to guessing. Includes the four narrower fixes that do *not* work.
+3. **Your own `AGENTS.md` can eat the whole run.** A rules file that says
+   "acknowledge before any action" is obeyed literally: the agent acknowledges,
+   ends its turn, does nothing, exits 0. This killed two production audits.
+4. **Don't pipe a diff when the agent can read the repo.** There's a hard input
+   cap (~1MB), and a diff with no surrounding code yields `UNVERIFIED` — a
+   NO-GO that means "I couldn't see enough", not "I found a defect".
+5. **One goal per call.** A headless agent executes one goal and *narrates*
+   several. A seven-part audit produced a plan and a stopped turn; the same
+   agent given one of those questions answered it with line numbers. This is
+   prompt *shape*, not wording — decompose, don't cajole.
+6. **The reviewer must not be the author** — with a worked example in which a
+   same-lineage reviewer returned "FAIL-CLOSED, safe to ship" on a live
+   permission change, and a different-lineage reviewer found four blockers on
+   the same diff. One had been *introduced by an earlier fix written against a
+   misdiagnosis*.
+7. **Verify the guard, in both directions.** The regression test written for
+   that bug was broken twice — once by regex escaping that made a negative
+   check report a false PASS, once by a fixed-width window that matched a dead
+   code branch. Both looked green against fixed code; neither would have caught
+   the bug. Mutation-test against the buggy revision, or you have an assumption
+   wearing a test's clothing.
+
+Plus a checklist to run before trusting the pipeline.
 
 ## Design lineage
 
