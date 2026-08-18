@@ -47,13 +47,87 @@ would have surfaced it; it required someone reading with fresh eyes and no stake
 
 | Tool | Best role | Why |
 |---|---|---|
-| **Codex CLI** (GPT) | Brain | Strong at adversarial review; runs headless from a script; different lineage from Claude, so it fails differently |
+| **Codex CLI** (GPT) | Brain — but read *Pick the brain by measurement* first | Runs headless from a script; different lineage from Claude, so it fails differently. **Which model you point it at matters more than the CLI.** |
 | **Claude Code** | Muscle + Scout | Long context, strong tool use, sub-agents for parallel read-only work |
 | **Moose Code Legion** | Second muscle | Local one-shot agent for bounded mechanical work; no memory between calls, so verify its output |
+| **LoopX** | State layer | Durable goals/todos/leases between turns. Not a model — the ledger that survives a crashed lane and makes a stale claim visible |
 | **Qwen Code** | Optional third opinion | See the verdict below |
 
 The specific vendors matter less than the **separation**. Any two capable models
 in these roles beat one model doing both.
+
+---
+
+## Pick the brain by measurement, not by name
+
+The trap this repo fell into: choosing a brain because its name said *codex*.
+A code-tuned model **sounds** right for a code repo. That is an assumption, and
+it went untested for weeks.
+
+On 2026-08-18 the same review prompt was run against the same two commits by
+four models, scored on a rubric fixed **before** any result was read — two real
+bugs in the diff to find, and two claims about code paths that do not exist to
+avoid inventing.
+
+| | `gpt-5.3-codex` (incumbent) | `gpt-5.6-sol` |
+|---|---|---|
+| real bugs found | both, hedged | **both, with arithmetic** |
+| phantom findings invented | **2, both filed as P0** | **0** |
+| defects nobody else found | 0 | **4** |
+| verdict | NO-GO — *unearned* | NO-GO — *earned* |
+
+The difference was not depth, it was **method**. The incumbent wrote:
+
+> *"**IF** ring area is computed from raw lon/lat degrees without proper
+> scaling…"*
+
+It reasoned about what the code probably did. The code already scaled by
+`cos(latitude)`, and a test proved a Denver building measured the same as an
+identical Houston one. The challenger opened the actual test fixture and
+computed the consequence:
+
+> *"25×20 m building with a 5×5 m courtyard should measure 475 m², but ships as
+> 500 m² — approximately 6,135 roof sq ft becomes 6,458, a 323 sq ft overquote."*
+
+One guessed. One read. **Only the second kind of reviewer can block a ship.**
+
+The challenger also found the most valuable defect of the run — not in the code,
+but in the *proof harness* meant to guarantee the code:
+
+> *"The money tests scan only three DIRECT files, so moving a billing call into
+> an **imported helper** passes."*
+
+Those guards had been mutation-tested and every one fired. They were still
+shallow, and nobody had noticed. **A green suite proves the assertions you
+wrote, not the property you meant.**
+
+### What to copy
+
+1. **Fix the rubric before you look.** Known bugs to find, known non-bugs to
+   avoid inventing. Otherwise you score on which report *reads* more confident.
+2. **Score false positives as hard as misses.** A brain that files P0s against
+   nonexistent code will block correct work, and the team learns to ignore it.
+3. **Read the reasoning, not the verdict.** Both models returned NO-GO. One had
+   earned it. A verdict is a summary; the argument is the evidence.
+4. **Re-run it when models change.** The result above carries a date because it
+   expires.
+
+### Do not retire the loser
+
+The demoted model caught a bug **no model of the winning lineage found**. It
+moved to the swarm, not the bin. A swarm whose members fail the same way is one
+reviewer running N times — the disagreement between lineages *is* the finding.
+Keep at least two vendors in rotation for anything touching money, compliance,
+or auth.
+
+### Check the roster actually exists
+
+This experiment started from the question "why aren't we using the newer codex?"
+Enumerating all 62 available models answered it: the codex family topped out at
+the version already in use, and the newer numbers belonged to a **different,
+non-codex line**. Two never-tested variants were sitting unused beside the one
+being argued about. **List what you actually have before debating what to
+switch to.**
 
 ---
 
