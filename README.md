@@ -49,6 +49,52 @@ See [`examples/`](examples/) for the two production adaptations
 wiring: deploy discipline, context briefs, goal ids, and a cheap-worker
 dispatch lane.
 
+### Choose the REVIEWER by measurement, not by name
+
+The table above names an engine. **Which model you point it at matters more
+than which CLI you use**, and it is the easiest thing in this whole system to
+get wrong by assumption — a code-tuned model *sounds* right for a code repo.
+
+Audition candidates on a diff whose answers you already know: seed it with real
+bugs to find, and fix the rubric *before* you read any output. Then score two
+things, not one.
+
+**Score false positives as hard as misses.** In a run on 2026-08-18, two models
+reviewed the same commits and both returned NO-GO. Only one had earned it — the
+incumbent filed two P0s against code paths that did not exist. The tell was in
+the prose:
+
+> *"**IF** ring area is computed from raw lon/lat degrees without proper
+> scaling…"*
+
+It reasoned about what the code probably did. The challenger opened the test
+fixture and computed the consequence: *"25×20 m building with a 5×5 m courtyard
+should measure 475 m², but ships as 500 m² — a 323 sq ft overquote."*
+
+One guessed, one read. **Only the second kind can block a ship**, and a reviewer
+that cries wolf on imaginary code trains the team to ignore it.
+
+Three things that run generalises:
+
+- **Read the reasoning, not the verdict.** A verdict is a summary; the argument
+  is the evidence. Identical verdicts came from wildly different work.
+- **Do not retire the loser.** The demoted model had caught a real bug that no
+  model of the winning lineage found. Move it to the swarm. A swarm whose
+  members fail the same way is one reviewer running N times — the disagreement
+  between lineages *is* the finding.
+- **Enumerate what you actually have first.** That audition began as "why aren't
+  we using the newer version?" Listing every available model answered it: the
+  family in use had no newer version, the higher numbers were a different line
+  entirely, and two never-tested candidates were sitting unused next to the one
+  being argued about.
+
+The most valuable finding of that run was not in the code at all. It was in the
+proof harness meant to guarantee the code: the money guards scanned only the
+three files they named, so moving a billing call into an *imported helper* would
+walk straight past them. Those guards had been mutation-tested and every one
+fired. **A green suite proves the assertions you wrote, not the property you
+meant** — which is worth asking your reviewer to attack directly.
+
 ## Design lineage
 
 Synthesized from an evaluation of five public multi-agent systems:
