@@ -89,6 +89,57 @@ After the final wave: full typecheck + build/deploy-to-staging + targeted
 live checks. Cross-lane breakage is the orchestrator's to reconcile, not a
 lane's.
 
+## Phase 4.5 — The bill is part of the gate
+
+A lane is not done because it compiles. Usage spikes are **defects**, and they
+are invisible in a diff — they show up on an invoice weeks later. One product
+cycle produced a single billing period **1.04 TB over** its egress allowance,
+**371 GB over** on storage and **61 GB over** on database I/O, from three
+features no code review would have flagged.
+
+**After any data-touching lane, read the provider's usage breakdown by
+function and find your new function by name.** If it is near the top of any
+tab, the lane is not finished.
+
+Four burn patterns, each of which shipped through review:
+
+1. **A reactive query re-reads its ENTIRE result set on every write to the
+   tables it touches — once per subscribed client.** The cost is
+   `rows x bytes/row x writes x viewers`, not "one query". One such query over
+   1,500 denormalized rows, subscribed by every open map, reached **39 GB in
+   a month**. Before adding a write to a hot table, ask which subscription
+   you just invalidated.
+2. **Managed backends bill BYTES READ, not bytes returned.** Trimming fields
+   from a return value saves nothing. To spend less you must read *fewer*
+   documents or *smaller* ones — narrow the index range, scope to a viewport,
+   or move the fat denormalized fields off the row the hot query reads.
+3. **Serving originals where a derivative belongs.** An import path stored
+   40,000 photos and generated **zero** thumbnails — the encoder lived in the
+   browser and the importer ran on the server — so every gallery tile pulled
+   a 700 KB original where 30 KB was designed to go. A 23x multiplier on
+   every grid load, and the origin of that terabyte. **Anything a grid
+   renders needs a derivative generated at write time.**
+4. **Unbounded reads and silent caps.** A `.collect()` on a per-tenant table
+   is a time bomb. A `.take(N)` that truncates without saying so is a
+   correctness bug wearing a performance costume — **report the truncation**,
+   name what is missing, and prefer a bound that can be described ("complete
+   back to Aug 14") over a bare "some rows are missing".
+
+Related rules that cost real money to learn:
+
+- **Crons are multipliers.** A five-minute cron is 288 runs a day, forever.
+  Put the cheap no-op check FIRST — two abandoned test records left a sweep
+  polling an external API ~25,000 times for nothing.
+- **Metered vendors need a contract in code**, not a comment: an allowlist of
+  the products you may buy, the price on the button before the click, a
+  deterministic idempotency key so a retry or double-click cannot bill twice,
+  a monthly ceiling, and **cost booked at dispatch, not on success** — a call
+  that bills and then times out still counts.
+- **Write backfills so they can be run again.** Cursor-paged, idempotent,
+  dry-run by default, typed confirm to apply. One repair crashed on a DNS
+  blip at 38,200 of 40,000 rows and resumed with zero duplicated work. A
+  backfill you cannot re-run is a backfill you will run wrong once.
+
 ## Phase 5 — Review
 Hand the COMBINED diff to the REVIEWER. Fix findings (small: inline;
 large: one fix-lane per finding cluster). Iterate until clean — then your
@@ -115,6 +166,34 @@ Keep the plan file until the run ships; it is the post-mortem record.
   in ways that surface as unrelated runtime failures. Stop the server,
   install, restart. Any lane needing a dependency change must hand that
   step back to the orchestrator between waves.
+- **A contract change must be BROADCAST to every live lane.** When one lane
+  changes a mutation signature, other lanes are still coding against the old
+  one and will ship a bricked surface. In one run a geofence lane made
+  coordinates mandatory; the map lane had already finished without them, and
+  every field note would have been refused on deploy. The orchestrator owns
+  this: the moment a lane reports a signature change, message the others.
+- **Lanes must verify the brief, not trust it.** A brief written by the
+  orchestrator is a hypothesis. One lane was told a query returned two fields
+  it did not return, checked, and redesigned around the truth instead of
+  building on sand. Reward that; a lane that silently "fixes" a wrong brief
+  by inventing data is the failure mode.
+- **Verify a lane's output, not its self-report.** Lanes exit early, report on
+  their own build watchers, and occasionally return a verdict with no work
+  behind it. Check the diff and run the gate yourself.
+- **A reviewer's confident verdict can be fiction.** A free-lane review once
+  returned two P0s claiming a security fix broke a portal flow; the flow it
+  named was called by nothing. Adjudicate findings against *intent*, not just
+  mechanics — cheap reviewers are sharp on mechanical audits and unreliable
+  about why a change was made.
+- **Never copy reassuring copy across contexts.** One surface's "archive"
+  promises the data survives; another's "remove" is a hard delete. Reusing
+  the friendly sentence makes the product lie. Match the words to what the
+  code actually does, and escalate the confirmation when nothing can undo it.
+- **Fail closed, and count the call sites.** A discriminator shared across
+  15 queries where none filtered on it would have granted telephony
+  authority from an unrelated assignment — two of those paths failed *open*.
+  When "make it safe" means "be right in fifteen places forever", choose the
+  duplication instead.
 - If Claude Code's native Agent Teams are enabled in your build, prefer
   them for the spawn layer — this doctrine (plan file, leases, waves,
   evidence, review) is unchanged; only the launch mechanism differs.

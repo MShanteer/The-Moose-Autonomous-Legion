@@ -95,6 +95,57 @@ walk straight past them. Those guards had been mutation-tested and every one
 fired. **A green suite proves the assertions you wrote, not the property you
 meant** — which is worth asking your reviewer to attack directly.
 
+### The roster: cheap brain, free muscle, paid by exception
+
+Auditioning tells you which model is *good*. This tells you which you can
+afford to run all day. Both matter; the second one is the reason a legion
+either runs continuously or gets switched off after one invoice.
+
+A roster proven in production through a full product cycle, priced per
+million tokens:
+
+| Seat | Model | In / Out | Why this one |
+|---|---|---|---|
+| **BRAIN** (plans, adjudicates) | `openai/gpt-5.6-luna` | **$0.20 / $1.20** | Same family as the flagship, 1M context, **25x cheaper** than `gpt-5.6-sol` ($5/$30) for planning work that is mostly reading |
+| **MUSCLE** (reviews the diff) | `inclusionai/ling-3.0-flash` | **$0.021 / $0.063** | A 500k-token review costs about **three cents**. The only genuinely free-tier model that completes agentic review lanes end to end |
+| **SWARM one-shots** | `sapiens-ai/agnes-2.5-flash` | free tier | Brilliant on a single bounded question; dies silently inside multi-step lanes — one-shot use only |
+
+Rejected after real testing, recorded so nobody re-learns it at token cost:
+`z-ai/glm-5.3` and its free twin return **empty output** on real-size inputs
+(17k tokens in, nothing out) while answering short prompts fine — the
+silent-success failure this doctrine exists to prevent.
+`inclusionai/ling-3.0-tiny` gets the right answer in 25k tokens and clogs
+the lane. `deepseek-v4-flash-free` 404s on the wire API.
+
+**The invoice that produced this table.** A repo-wide review was pointed at
+`gpt-5.5-pro` ($30 in / **$180 out**) with an open-ended prompt — *"review
+everything, read files in full where risky."* It read a 9,000-line file end
+to end, burned **486,722 tokens in a single run**, took the account from a
+fresh $35 top-up to **-$5**, and died mid-run on a 402 without ever
+returning a verdict. Money gone, no review. Meanwhile the free lane running
+beside it finished its focused audit and found a real defect.
+
+Four rules follow from that, and they are not negotiable:
+
+1. **Never start a paid-tier run without saying first what it will cost.**
+   A standing "use the good model" is not authorization for an unbounded
+   run. Say the model, the scope, and the rough spend; get a yes.
+2. **Scope paid prompts.** One commit or one file cluster per run. State
+   *"read diff hunks plus 50 lines of context; do not read files over N
+   lines in full."* Open-ended plus pro-tier is a blank cheque.
+3. **Free lanes are the default reviewer.** Escalate to paid for the single
+   hardest verdict, never for the sweep.
+4. **A negative balance blocks the free tier too.** Most gateways refuse
+   *every* model, free ones included, once the account goes under. One
+   runaway takes the whole legion offline — so put a per-key spend limit
+   and a balance alert on the account, server-side, where a bug can't
+   argue with it.
+
+**Cheap changes the shape of the work, not just the bill.** At three cents a
+review you stop rationing verification: every lane gets an adversarial pass,
+disagreements get a third opinion, and the swarm can afford to be wrong out
+loud. That is worth more than any single model upgrade.
+
 ## Design lineage
 
 Synthesized from an evaluation of five public multi-agent systems:
@@ -109,7 +160,7 @@ protocol, dependency auto-unblock),
 [VRSEN/OpenSwarm](https://github.com/VRSEN/OpenSwarm) ("the orchestrator
 never does lane work").
 
-## The ten invariants
+## The thirteen invariants
 
 1. Plan file as the shared state machine (`depends_on`, canonical file
    lists, writable status/log per lane)
@@ -126,6 +177,14 @@ never does lane work").
 10. UI work is verified by PIXELS — a headless-browser screenshot you
     actually look at; SSR text, HTTP 200s, and a populated DOM all coexist
     with a blank screen
+11. The bill is part of the gate — after any data-touching lane, read the
+    provider's usage breakdown by function and find your new function by
+    name. A usage spike is a defect, and it is invisible in a diff
+12. Truncation is reported, never silent — a cap that drops rows without
+    saying so is a correctness bug wearing a performance costume
+13. A contract change is broadcast to every live lane the moment it lands;
+    lanes verify the brief rather than trusting it, and the orchestrator
+    verifies their output rather than their self-report
 
 ## License
 
