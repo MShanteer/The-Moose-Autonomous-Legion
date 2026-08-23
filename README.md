@@ -55,7 +55,7 @@ Copy the skill into your repo's Claude Code skills directory:
 
 ```bash
 mkdir -p .claude/skills/coding-legion
-curl -fsSL https://raw.githubusercontent.com/MShanteer/The-Moose-Autonomous-Legion/main/skills/coding-legion/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/MShanteer/The-Moose-Autonomous-Legion/master/skills/coding-legion/SKILL.md \
   -o .claude/skills/coding-legion/SKILL.md
 ```
 
