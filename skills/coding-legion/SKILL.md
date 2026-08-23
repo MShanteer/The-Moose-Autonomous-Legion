@@ -19,9 +19,14 @@ adaptations):
   review the diff). Any equivalent works — the invariants are: a written
   plan BEFORE sharding, and a review of the MERGED diff before shipping.
 - **ORCHESTRATOR** — the Claude Code session reading this skill.
-- **STATE LAYER** — durable lane tracking between turns. We use LoopX
-  (goals/todos/leases CLI). Without one, the plan file's status fields are
-  the fallback ledger — weaker across crashes, still workable.
+- **STATE LAYER** — durable lane tracking between turns. **The plan file
+  is the default**, committed to the repo: it survives context compaction,
+  a human can review it, and it becomes the post-mortem record. Your
+  harness's task ids and completion notifications are the crash detector.
+  A dedicated leases CLI earns its place only when the ORCHESTRATOR itself
+  may die mid-run, or two independent orchestrators share one repo —
+  otherwise it is ceremony that raises adoption cost for no measured
+  return. Do not let tooling you have not installed block a run.
 
 ## Phase 0 — Preconditions
 - **A running local dev instance** (the app on localhost + its backend
@@ -57,11 +62,25 @@ Sharding rules:
 - Shared foundations (schemas, generated code, config) belong to ONE lane,
   usually wave 1, that others depend on.
 
-## Phase 2 — Lease (state layer)
-Register each lane in your state layer (LoopX: `todo add` + `task-lease`,
-claimed as `swarm-<run-id>-T<id>`). One lease per lane — the double-claim
-guard and the crash detector (stale lease = dead lane; only the
-orchestrator retires lanes).
+## Phase 2 — Claim (state layer)
+Give every lane an owner and a way to tell whether it is still alive. The
+mechanism is negotiable; these three properties are not:
+
+- **One lane per file.** File-disjoint assignment, written into the lane
+  prompt, IS the double-claim guard. Two lanes told they own the same file
+  will collide no matter what a lease says — so spend the effort in Phase 1
+  sharding, not on a runtime refusal.
+- **Liveness must be observable.** You have to answer "is T4 still running?"
+  without asking T4. Background task ids plus completion notifications do
+  this natively. If your harness can't, a lease timestamp is the fallback:
+  stale lease = dead lane.
+- **Only the ORCHESTRATOR retires a lane.** A lane never marks itself done —
+  see Phase 3.
+
+Record the claim wherever it is durable; the plan file's `status` field is
+enough, and it is the option a reader can adopt today. Add a leases CLI only
+if your orchestrator can crash and be replaced mid-run, so its successor can
+tell a dead lane from a slow one.
 
 ## Phase 3 — Execute in waves (native subagents)
 - Compute unblocked tasks → launch that wave as **parallel background

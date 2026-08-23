@@ -12,10 +12,42 @@ PLANNER plans → Claude orchestrates → state layer persists
       → parallel lanes execute → integration gate → PLANNER reviews
 ```
 
-In production at MTS this runs as **Codex → Claude → LoopX → Legion**: the
-OpenAI Codex CLI writes and reviews plans, the Claude Code session
-orchestrates, LoopX persists lanes between turns, and native subagents do
-the work in parallel waves.
+In production at MTS this runs as **Codex → Claude → Legion**: the OpenAI
+Codex CLI writes and reviews plans, the Claude Code session orchestrates,
+and native subagents do the work in parallel waves. The lane ledger is the
+plan file itself, committed to the repo.
+
+### You probably do not need a state-layer CLI
+
+Earlier versions of this doctrine named a leases tool (LoopX) as *the* state
+layer, and made it sound like a prerequisite. A full product cycle run under
+this skill — roughly thirty lanes across notifications, geofencing,
+permissions, an assistant program and a terabyte-scale cost investigation —
+used none of it, and nothing was lost. That is worth being honest about,
+because a phantom dependency is the most expensive kind: it stops people
+adopting a method that would otherwise work for them today.
+
+What actually carried state, and what each thing replaced:
+
+- **The plan file, committed** — the durable ledger. It survived context
+  compaction, stayed reviewable by a human, and became the post-mortem
+  record. This is invariant #1 already.
+- **The harness's own task ids and completion notifications** — *this is
+  the crash detector.* A stale lease infers death from a timestamp; a
+  runtime that tells you the moment a lane exits does not need to infer.
+- **File-disjoint assignment written into the lane prompt** — *this is the
+  double-claim guard.* Two lanes never collided all cycle, because each
+  prompt named the files that lane owned. A lease that refuses a second
+  claim is a late check on a problem sharding should have prevented.
+- **Git commits per lane**, for anything that must outlive the session.
+
+Reach for a dedicated leases CLI when the **orchestrator itself** may die
+mid-run and a different session has to adopt half-finished lanes, or when
+two independent orchestrators share one repo. Both are real; neither is the
+common case. Keep the *lease discipline* either way — one lane per file,
+liveness you can observe without asking the lane, and only the orchestrator
+retires a lane. That discipline is load-bearing. The tooling around it is
+a preference.
 
 ## Install
 
@@ -41,7 +73,7 @@ The skill is deliberately role-parameterized:
 |---|---|---|
 | PLANNER / REVIEWER | OpenAI Codex CLI (`npm run brain` / `npm run muscle`) | any engine that writes plans + reviews diffs |
 | ORCHESTRATOR | the Claude Code session | same |
-| STATE LAYER | LoopX (goals / todos / leases) | anything durable; plan-file statuses as fallback |
+| STATE LAYER | the committed plan file + the harness's task notifications | same — add a leases CLI only if orchestrators can die or overlap |
 | WORKERS | native Claude subagents (+ a one-shot local agent for cheap lanes) | same |
 
 See [`examples/`](examples/) for the two production adaptations

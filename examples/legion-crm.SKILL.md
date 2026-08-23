@@ -1,6 +1,6 @@
 ---
 name: coding-legion
-description: Parallel agent swarm for the Legion repo — shard a Codex (Brain) plan into dependency-ordered lanes and execute them with parallel Claude subagents under LoopX leases, then muscle-review the merged diff. Use when the owner says "coding legion", "swarm this", "parallelize", "run lanes", or a Brain plan has 3+ independent increments. Composes Codex→Claude→LoopX→Swarm; never replaces the Brain.
+description: Parallel agent swarm for the Legion repo — shard a Codex (Brain) plan into dependency-ordered lanes and execute them with parallel Claude subagents under file-disjoint lane claims, then muscle-review the merged diff. Use when the owner says "coding legion", "swarm this", "parallelize", "run lanes", or a Brain plan has 3+ independent increments. Composes Codex→Claude→Swarm; never replaces the Brain.
 ---
 
 # 🦌 Coding Legion — parallel lanes under the Brain & Muscle model (Legion)
@@ -8,8 +8,8 @@ description: Parallel agent swarm for the Legion repo — shard a Codex (Brain) 
 The swarm layer executes a **Codex plan** in parallel. It never invents
 architecture (that stays the Brain's job — `docs/BRAIN_AND_MUSCLE.md`) and
 never ships unreviewed (the merged diff still goes through `npm run muscle`).
-Pipeline: **Codex plans → this session orchestrates → LoopX persists →
-subagent lanes execute → integration gate → Codex reviews.**
+Pipeline: **Codex plans → this session orchestrates → the plan file
+persists → subagent lanes execute → integration gate → Codex reviews.**
 
 Synthesized from ClawTeam (worker/lease protocol), am-will/swarms (plan-file
 state machine, waves, context packs), affaan-m/claude-swarm (quality gate,
@@ -26,8 +26,9 @@ file-disjoint sharding), and Anthropic's native Agent Teams protocol shapes.
 - A Brain plan exists (`npm run brain "…"` output) OR the task is mechanical
   enough that sharding is bookkeeping, not design. When in doubt: Brain first.
 - Working tree is clean enough to attribute lane diffs (commit or stash noise).
-- LoopX goal is bootstrapped (`.loopx/registry.json`; Legion goal:
-  `legion-upgrade-2026-08` unless a new goal fits better).
+- The plan file `.codex/swarm/<run-id>.md` is created and committed. It is
+  the lane ledger, the claim record, and the post-mortem — no other state
+  tooling is required to start a run.
 
 ## Phase 1 — Shard (orchestrator, in this session)
 Normalize the Brain plan into a **plan file** at `.codex/swarm/<run-id>.md` —
@@ -51,11 +52,14 @@ Sharding rules:
 - Shared-schema edits (convex/schema.ts, `_generated`) belong to ONE lane,
   usually wave 1, that others depend on.
 
-## Phase 2 — Lease (LoopX)
-For each task: `loopx todo add --goal-id <goal> --text "SWARM <run-id> T<id>: …"`
-then claim at launch with `loopx task-lease` / `--claimed-by swarm-<run-id>-T<id>`.
-One lease per lane — LoopX is the double-claim guard and the crash detector
-(stale lease = dead lane; only the orchestrator retires lanes).
+## Phase 2 — Claim
+At launch, set the task's `status: running` in the plan file and record the
+subagent's task id beside it. That is the claim, and it is enough.
+
+The double-claim guard is the file-disjoint `files:` list in the lane prompt,
+not a runtime refusal. The crash detector is the harness's completion
+notification, which fires the moment a lane exits. Only the orchestrator
+retires a lane.
 
 ## Phase 3 — Execute in waves (native subagents)
 - Compute unblocked tasks → launch that wave as **parallel background
@@ -70,8 +74,8 @@ One lease per lane — LoopX is the double-claim guard and the crash detector
   touch other lanes' files — if you believe you must, STOP and report back
   instead ("report before touching unlisted paths").
 - A lane is **done on evidence, not self-report**: the orchestrator checks
-  the validation output in the log and the diff before marking `done`,
-  completing the LoopX todo, and scheduling dependents.
+  the validation output in the log and the diff before marking `done`
+  in the plan file and scheduling dependents.
 - Failed lane → mark `failed`, requeue once with the failure context; twice →
   stop the wave and consult the Brain.
 
@@ -86,8 +90,8 @@ by our senior reviewer). Fix findings (small: inline; large: one fix-lane per
 finding cluster). Iterate until clean — then normal deploy discipline.
 
 ## Phase 6 — Writeback
-`loopx todo complete` each lane with evidence + a run summary note on the
-goal. Delete `.codex/swarm/<run-id>.md` only after the run ships; it is the
+Close each lane in the plan file with its evidence, then append a run
+summary to the top of the file. Delete `.codex/swarm/<run-id>.md` only after the run ships; it is the
 post-mortem record until then.
 
 ## Hard rules
@@ -101,7 +105,7 @@ post-mortem record until then.
   rule). Solo work resumes only between waves or for the integration gate.
 - Secrets never enter the plan file or lane prompts — lanes read env
   themselves.
-- Legion-only: do not blend with another repo's brain/muscle/LoopX. The
+- Legion-only: do not blend with another repo's brain/muscle/plan files. The
   WeatherOps repo has its own copy of this skill wired to its own stack.
 - **Never install/update packages while the dev server runs** — a live
   watcher holding files during an install corrupts the dependency tree
