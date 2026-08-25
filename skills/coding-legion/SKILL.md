@@ -144,6 +144,17 @@ Four burn patterns, each of which shipped through review:
    name what is missing, and prefer a bound that can be described ("complete
    back to Aug 14") over a bare "some rows are missing".
 
+5. **Retention work done INLINE with the write it retains.** A mutation that
+   inserts a row and then reads a wide range of the SAME index to find old
+   rows to delete has, by construction, put its own write range inside its
+   own read set — so it conflicts with every concurrent writer, and it sizes
+   the read by what is being KEPT rather than what is being DELETED. One such
+   function read 3,200 rows to delete 200, and logged 423 conflicts in 72
+   hours. **Optimistic-concurrency retries re-run the whole transaction**, so
+   a conflict count is a cost multiplier, not a latency stat. Move retention
+   to a scheduled pass over a time range that new writes cannot enter; the
+   disjointness is the fix, and the batch size is only a bound on top of it.
+
 Related rules that cost real money to learn:
 
 - **Crons are multipliers.** A five-minute cron is 288 runs a day, forever.
@@ -208,6 +219,20 @@ Keep the plan file until the run ships; it is the post-mortem record.
   promises the data survives; another's "remove" is a hard delete. Reusing
   the friendly sentence makes the product lie. Match the words to what the
   code actually does, and escalate the confirmation when nothing can undo it.
+- **A time column is not a server-time column.** A retention pass that ranges
+  on a timestamp is only safe if that timestamp is one the CLIENT CANNOT SET.
+  One table had three indexes and every one of them was on a value the browser
+  stamped; ranging on it would have let a device with a skewed-past clock
+  insert directly into the delete range — re-opening the conflict the change
+  existed to remove AND deleting fresh rows. Find the field the server stamps
+  (most databases have one for free) and range on that. This came from a lane
+  that refused to build on a brief that said otherwise.
+- **Exit code 0 is not evidence of work.** A reviewer in this very run consumed
+  its input, produced no review, and exited 0 — the diff piped to it contained
+  one invalid byte. A run that fails at the door looks exactly like a run that
+  passed. Check that the artifact EXISTS and says something, not that the
+  command returned. This is the same failure as an agent that burns its turn
+  on a preamble and exits clean.
 - **Fail closed, and count the call sites.** A discriminator shared across
   15 queries where none filtered on it would have granted telephony
   authority from an unrelated assignment — two of those paths failed *open*.

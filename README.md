@@ -192,7 +192,7 @@ protocol, dependency auto-unblock),
 [VRSEN/OpenSwarm](https://github.com/VRSEN/OpenSwarm) ("the orchestrator
 never does lane work").
 
-## The thirteen invariants
+## The fourteen invariants
 
 1. Plan file as the shared state machine (`depends_on`, canonical file
    lists, writable status/log per lane)
@@ -217,6 +217,9 @@ never does lane work").
 13. A contract change is broadcast to every live lane the moment it lands;
     lanes verify the brief rather than trusting it, and the orchestrator
     verifies their output rather than their self-report
+14. Exit code 0 is not evidence of work — check that the artifact exists and
+    says something. A run that failed at the door looks exactly like one
+    that passed
 
 ## License
 
