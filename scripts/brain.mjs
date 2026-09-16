@@ -24,10 +24,25 @@
 // reasoning_effort: low (or medium for planning) and give headroom.
 
 import { resolveKey, BRAIN_ROSTER, BRAIN_SECOND_ROSTER, rosterFromArgv, GATEWAY } from './legion-key.mjs';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 
-const BRIEF = 'docs/CONTEXT_BRIEF.md';
-const CONSTRAINTS = 'docs/BRAIN_CONSTRAINTS.md';
+// docs/CONTEXT_BRIEF.md, or any docs/*CONTEXT_BRIEF*.md (repos tend to prefix
+// it with the product name). LEGION_BRIEF overrides. Discovery never throws
+// at import (a FILE named docs, an unreadable dir → fall back), the candidate
+// list is sorted so the choice is deterministic, and the choice is logged so a
+// stale archived brief cannot be fed to the model unnoticed.
+function discoverBrief() {
+  if (process.env.LEGION_BRIEF) return process.env.LEGION_BRIEF;
+  if (existsSync('docs/CONTEXT_BRIEF.md')) return 'docs/CONTEXT_BRIEF.md';
+  try {
+    if (!statSync('docs').isDirectory()) return 'docs/CONTEXT_BRIEF.md';
+    const found = readdirSync('docs').filter((f) => /CONTEXT_BRIEF.*\.md$/i.test(f)).sort((a, b) => a.length - b.length || a.localeCompare(b));
+    if (found.length > 1) console.error(`[brain] ${found.length} brief candidates in docs/ (${found.join(', ')}); using ${found[0]} — set LEGION_BRIEF to choose`);
+    return found[0] ? `docs/${found[0]}` : 'docs/CONTEXT_BRIEF.md';
+  } catch { return 'docs/CONTEXT_BRIEF.md'; }
+}
+const BRIEF = discoverBrief();
+const CONSTRAINTS = process.env.LEGION_BRAIN_CONSTRAINTS || 'docs/BRAIN_CONSTRAINTS.md';
 
 let rawArgv = process.argv.slice(2);
 const second = rawArgv.includes('--second');
@@ -93,7 +108,7 @@ async function ask(model, key) {
 }
 
 const { key, source } = resolveKey();
-console.error(`[brain] key from ${source}; roster ${ROSTER.join(' → ')}; ${files.length} file(s) inlined`);
+console.error(`[brain] key from ${source}; roster ${ROSTER.join(' → ')}; brief ${existsSync(BRIEF) ? BRIEF : '(none)'}; ${files.length} file(s) inlined`);
 
 let out = null;
 const failures = [];

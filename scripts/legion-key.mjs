@@ -58,16 +58,34 @@ export const LEGION_REPO = process.env.LEGION_REPO ?? '';
 
 export function keyCandidates() {
   const c = [path.resolve('.env.local'), path.resolve('.env')];
-  if (LEGION_REPO) c.push(path.join(LEGION_REPO, '.env.local'));
+  if (LEGION_REPO) c.push(path.join(LEGION_REPO, '.env.local'), path.join(LEGION_REPO, '.env'));
   return c;
+}
+
+// Tolerates `export ZENMUX_API_KEY=…`, surrounding whitespace, quotes, and
+// CRLF. An empty value (`ZENMUX_API_KEY=`) is skipped, not returned as "".
+// HORIZONTAL whitespace only ([ \t], never \s): `\s*` crosses newlines, and
+// an empty value would have captured the NEXT line — another provider's
+// secret — as the key. Caught by the review gate on this very file.
+// Global: EVERY assignment in the file is examined and the first non-empty
+// value wins. A non-global match returned only the first line, so an empty
+// `ZENMUX_API_KEY=` above a real one skipped the whole FILE (review pass 6).
+const KEY_LINE = /^[ \t]*(?:export[ \t]+)?ZENMUX_API_KEY[ \t]*=[ \t]*(.*)$/gm;
+
+function firstKeyIn(text) {
+  for (const m of text.matchAll(KEY_LINE)) {
+    const v = m[1].trim().replace(/^["']|["']$/g, '').trim();
+    if (v) return v;
+  }
+  return '';
 }
 
 export function resolveKey() {
   if (process.env.LEGION_UPSTREAM_KEY) return { key: process.env.LEGION_UPSTREAM_KEY, source: 'env LEGION_UPSTREAM_KEY (explicit override)' };
   for (const p of keyCandidates()) {
     if (!existsSync(p)) continue;
-    const m = readFileSync(p, 'utf8').match(/^ZENMUX_API_KEY=(.+)$/m);
-    if (m) return { key: m[1].trim().replace(/^["']|["']$/g, ''), source: `file ${p}` };
+    const v = firstKeyIn(readFileSync(p, 'utf8'));
+    if (v) return { key: v, source: `file ${p}` };
   }
   if (process.env.ZENMUX_API_KEY) return { key: process.env.ZENMUX_API_KEY, source: 'env ZENMUX_API_KEY (LAST RESORT — may be a stale one)' };
   throw new Error(`No ZENMUX_API_KEY found. Checked: ${keyCandidates().join(', ')}, then env. Copy .env.local.example to .env.local.`);
