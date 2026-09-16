@@ -1,0 +1,18 @@
+{
+  "name": "the-moose-autonomous-legion",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Parallel agent swarm skill for Claude Code — plan-driven lanes, evidence-gated completion, reviewed merges. Includes runnable Brain/Muscle gates and the audition kit that picks the roster by measurement.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "legion:check": "node scripts/legion-check.mjs",
+    "brain": "node scripts/brain.mjs",
+    "muscle": "node scripts/muscle.mjs",
+    "muscle:second": "node scripts/muscle.mjs --second",
+    "audition:review": "node examples/auditions/audition-review.mjs",
+    "audition:brain": "node examples/auditions/audition-brain.mjs",
+    "audition:impl": "node examples/auditions/audition-impl.mjs"
+  }
+}
