@@ -43,6 +43,10 @@ function discoverBrief() {
 }
 const BRIEF = discoverBrief();
 const CONSTRAINTS = process.env.LEGION_BRAIN_CONSTRAINTS || 'docs/BRAIN_CONSTRAINTS.md';
+// The constraints are the one input whose loss used to be silent: a missing
+// or mistyped path produced a plan with ZERO product invariants that looked
+// identical to a healthy run. Say so, loudly, every time.
+if (!existsSync(CONSTRAINTS)) console.error(`[brain] WARNING: no constraints file at ${CONSTRAINTS} — this plan is produced with NO product invariants. Create it or set LEGION_BRAIN_CONSTRAINTS.`);
 
 let rawArgv = process.argv.slice(2);
 const second = rawArgv.includes('--second');
