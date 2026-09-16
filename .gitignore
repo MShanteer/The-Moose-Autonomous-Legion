@@ -1,0 +1,6 @@
+node_modules/
+.env*
+!.env.local.example
+*.env
+.DS_Store
+Thumbs.db

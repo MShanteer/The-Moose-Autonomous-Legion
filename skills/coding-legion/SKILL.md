@@ -99,9 +99,13 @@ tell a dead lane from a slow one.
   dependents.
 - Failed lane → requeue once with the failure context; twice → stop the
   wave and consult the PLANNER.
-- Cheap mechanical lanes may dispatch to a one-shot local agent instead of
-  a subagent if you have one — its context pack must be fully
-  self-contained and its output always verified by the orchestrator.
+- Cheap mechanical lanes may dispatch to a one-shot model instead of a
+  subagent when the spec is tight and self-contained — its context pack must
+  be fully self-contained and its output always verified by the orchestrator.
+  Use the **implementation seat** of your roster (`IMPL_ROSTER` in
+  `scripts/legion-key.mjs`), chosen by the build audition. Those models are
+  builders, not planners or reviewers: never let one shape the contract it
+  implements.
 
 ## Phase 4 — Integration gate (orchestrator)
 After the final wave: full typecheck + build/deploy-to-staging + targeted
@@ -171,9 +175,18 @@ Related rules that cost real money to learn:
   backfill you cannot re-run is a backfill you will run wrong once.
 
 ## Phase 5 — Review
-Hand the COMBINED diff to the REVIEWER. Fix findings (small: inline;
-large: one fix-lane per finding cluster). Iterate until clean — then your
-normal deploy discipline.
+Hand the COMBINED diff to the REVIEWER (`npm run muscle`). A review is a
+**verdict-shaped artifact**: a leading `VERDICT: CLEAN | FINDINGS` line and a
+body. A preamble, an empty answer, or a bare verdict is not a review — skip
+that model, try the next; nobody reviewing is the failure. On anything
+touching credentials, scope, consent, money, or the review tooling itself,
+run a **second lineage** (`npm run muscle -- --second`): agreement from two
+families with no shared context is the strongest signal you will get, and
+disagreement is the finding. **Verify every finding against the real code**
+before acting — the reviewer is a second opinion, not an authority. Fix
+what is confirmed (small: inline; large: one fix-lane per finding cluster),
+reject what is not, explicitly. Iterate until clean — then your normal
+deploy discipline.
 
 ## Phase 6 — Writeback
 Complete each lane in the state layer with evidence + a run summary.
@@ -238,6 +251,16 @@ Keep the plan file until the run ships; it is the post-mortem record.
   authority from an unrelated assignment — two of those paths failed *open*.
   When "make it safe" means "be right in fifteen places forever", choose the
   duplication instead.
+- **Seat models by measured role, not by name.** Audition each seat on its
+  own job — review, plan, build — with the rubric fixed first and false
+  positives scored as misses (`docs/AUDITION_METHOD.md`,
+  `examples/auditions/`). One model family split down the middle on the
+  second domain this ran on; a roster proven on one product did not travel.
+  Re-audition when the domain changes or when real diffs stop looking like
+  the fixture.
+- **A spec's promises are tested or they are not promises.** Every rule a
+  spec says is graded gets a test; validate the harness against a reference
+  implementation before it grades anyone.
 - If Claude Code's native Agent Teams are enabled in your build, prefer
   them for the spawn layer — this doctrine (plan file, leases, waves,
   evidence, review) is unchanged; only the launch mechanism differs.

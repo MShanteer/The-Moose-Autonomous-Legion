@@ -65,6 +65,30 @@ curl -fsSL https://raw.githubusercontent.com/MShanteer/The-Moose-Autonomous-Legi
 Then in a Claude Code session: `/coding-legion` — or just say
 "swarm this" / "run lanes" when you have a plan with independent parts.
 
+### The gates are runnable, not just written
+
+`scripts/` holds the PLANNER and REVIEWER as one-command Node scripts against
+any OpenAI-compatible gateway (ZenMux by default). A doctrine you cannot
+execute in one command is a doctrine that gets skipped, and every defect the
+production repos shipped came from skipping it.
+
+```bash
+cp scripts/*.mjs your-repo/scripts/ && cp .env.local.example your-repo/
+# add the four npm scripts from package.json, put a capped key in .env.local, then:
+npm run legion:check            # proves the key + every rostered model; prints the key's SOURCE, never the key
+npm run brain -- --files lib/a.ts "Plan how to X. Files + data impact + deploy order + risks. Plan, not code."
+npm run muscle                  # reviews the working-tree diff (new files included) before any push
+npm run muscle -- --second      # same diff, a different model lineage — disagreement is the finding
+```
+
+Optional, read from the repo you run in: `docs/CONTEXT_BRIEF.md` (inlined into
+every plan), `docs/BRAIN_CONSTRAINTS.md` (what a plan must never violate),
+`docs/REVIEW_CONTEXT.md` (your backend's false-positive classes and what to
+look for). The reviewer only accepts **verdict-shaped** output — a leading
+`VERDICT: CLEAN` or `VERDICT: FINDINGS` line with a body — and falls through
+to the next model otherwise. [`docs/REVIEW_GATE.md`](docs/REVIEW_GATE.md)
+explains the seven review passes it took to make that rule right.
+
 ## Adapt it to your stack
 
 The skill is deliberately role-parameterized:
@@ -76,9 +100,10 @@ The skill is deliberately role-parameterized:
 | STATE LAYER | the committed plan file + the harness's task notifications | same — add a leases CLI only if orchestrators can die or overlap |
 | WORKERS | native Claude subagents (+ a one-shot local agent for cheap lanes) | same |
 
-See [`examples/`](examples/) for the two production adaptations
-(a Convex/Next.js CRM and a large SaaS monorepo) showing repo-specific
-wiring: deploy discipline, context briefs, goal ids, and a cheap-worker
+See [`examples/`](examples/) for the three production adaptations
+(a Convex/Next.js CRM, a large SaaS monorepo, and a greenfield multi-tenant
+access-control product on PostgreSQL) showing repo-specific wiring: deploy
+discipline, context briefs, goal ids, domain invariants, and a cheap-worker
 dispatch lane.
 
 ### Choose the REVIEWER by measurement, not by name
@@ -133,6 +158,11 @@ Auditioning tells you which model is *good*. This tells you which you can
 afford to run all day. Both matter; the second one is the reason a legion
 either runs continuously or gets switched off after one invoice.
 
+> **This table is history, kept on purpose.** It was proven through one
+> product cycle on one domain. The next domain overturned two of its three
+> seats in an afternoon — see *Seats by role* below. A roster is a
+> measurement with a date on it, not a fact about the models.
+
 A roster proven in production through a full product cycle, priced per
 million tokens:
 
@@ -178,6 +208,44 @@ review you stop rationing verification: every lane gets an adversarial pass,
 disagreements get a third opinion, and the swarm can afford to be wrong out
 loud. That is worth more than any single model upgrade.
 
+### Seats by role, measured — what the second domain taught (2026-09-15)
+
+A new product (multi-tenant hotel access control) re-ran the audition and
+added two more: one for **planners**, one for **builders**, each tested on its
+own job. Full method and results: [`docs/AUDITION_METHOD.md`](docs/AUDITION_METHOD.md);
+runnable kit: [`examples/auditions/`](examples/auditions/).
+
+Three things generalise beyond that domain:
+
+- **The same model family splits by role.** One OpenAI tier planned 5/5 and
+  is now a second-lineage planner. Its cheapest sibling obeyed a wrong
+  requirement in both planning runs *while quoting the invariant it was
+  breaking* — and then built a 19-test spec perfectly in 12 seconds for under
+  a tenth of a cent. It is a builder. Seat by measured role, not by family,
+  and never let a builder shape the contract it implements.
+- **A proven roster does not travel.** The incumbent reviewer from the
+  previous cycle scored 1 of 4 with a false positive on the new domain and
+  opened with CLEAN before listing a finding. The cheap models that replaced
+  it planned and reviewed at a fraction of the cost. Re-audition on every new
+  domain, and again when real diffs stop looking like the fixture: one model
+  aced a 3k-token fixture and then answered two real 29k-token diffs with a
+  preamble and a bare verdict line.
+- **The audition kit needs the review gate too.** Reviewing the kit itself
+  found thirteen defects across seven passes — a scorer cleared by the word
+  "correct", a spec that promised a cap nothing tested, a negation check that
+  looked at only the first match. The reviewer reviewing the reviewer is where
+  tooling defects live.
+
+| Seat | Roster on that domain | Command |
+|---|---|---|
+| Brain | deepseek-v4.1-flash → glm-5.3-flash → ling-3.0-flash | `npm run brain` |
+| Brain, second lineage | gpt-5.6-luna → gpt-5-mini | `npm run brain -- --second` |
+| Muscle | deepseek-v4.1-flash → ling-3.0-flash | `npm run muscle` |
+| Muscle, second lineage | tencent/hy3 → glm-5.3-flash | `npm run muscle -- --second` |
+| Implementation lanes | gpt-5-nano → gpt-5.4-nano → qwen3.8-flash | one-shot mechanical lanes with a tight spec |
+
+Whole afternoon, three auditions, roughly forty calls: under fifteen cents.
+
 ## Design lineage
 
 Synthesized from an evaluation of five public multi-agent systems:
@@ -192,7 +260,7 @@ protocol, dependency auto-unblock),
 [VRSEN/OpenSwarm](https://github.com/VRSEN/OpenSwarm) ("the orchestrator
 never does lane work").
 
-## The fourteen invariants
+## The eighteen invariants
 
 1. Plan file as the shared state machine (`depends_on`, canonical file
    lists, writable status/log per lane)
@@ -220,6 +288,22 @@ never does lane work").
 14. Exit code 0 is not evidence of work — check that the artifact exists and
     says something. A run that failed at the door looks exactly like one
     that passed
+15. A review is a verdict-shaped artifact — an explicit leading verdict line
+    and a body. A preamble, an empty answer, or a bare verdict is not a
+    review; falling through to the next model is fine, nobody reviewing is
+    the failure (`docs/REVIEW_GATE.md`)
+16. Seat models by measured role, not by family or price — audition each seat
+    on its own job (review, plan, build), fix the rubric first, score false
+    positives as misses, read every output, and re-audition when the domain
+    or the diff size changes (`docs/AUDITION_METHOD.md`)
+17. Two lineages on anything sensitive — credentials, scope, consent, money,
+    and the review tooling itself. Agreement from two families with no shared
+    context is the strongest signal this system produces; disagreement is
+    the finding
+18. Every rule a spec promises is graded gets a test, and the harness is
+    validated against a reference implementation before it grades anyone —
+    a harness bug fails every candidate identically and looks like a model
+    problem
 
 ## License
 
