@@ -76,7 +76,25 @@ const sent = truncated
   ? cleaned.slice(0, CAP) + `\n\n[DIFF TRUNCATED: ${cleaned.length - CAP} of ${cleaned.length} chars were NOT included above and were NOT reviewed. VERDICT: CLEAN is not permitted on truncated input — use VERDICT: FINDINGS and make the first finding "diff truncated; remainder unreviewed".]`
   : cleaned;
 
-const REVIEW_CONTEXT = existsSync('docs/REVIEW_CONTEXT.md') ? readFileSync('docs/REVIEW_CONTEXT.md', 'utf8') : [
+// Without the repo's review context the reviewer knows none of the product
+// invariants. That is allowed for a generic repo, but never silently: warn on
+// stderr and tag the banner so a CLEAN from an invariant-free run is visibly
+// a weaker CLEAN.
+const REVIEW_CONTEXT_PATH = process.env.LEGION_REVIEW_CONTEXT || 'docs/REVIEW_CONTEXT.md';
+// Decide on CONTENT, not existence: a zero-byte file (botched checkout, LFS
+// pointer) or a directory at that path must count as "no context", loudly.
+let contextRaw = '', readError = '';
+const contextExists = existsSync(REVIEW_CONTEXT_PATH);
+try { contextRaw = contextExists ? readFileSync(REVIEW_CONTEXT_PATH, 'utf8') : ''; }
+catch (e) { contextRaw = ''; readError = e.code ?? e.message; }
+// A git-LFS pointer is ~130 bytes of text, not empty — reject it explicitly.
+const looksLikeLfsPointer = /^version https:\/\/git-lfs\.github\.com\/spec\/v1\b/.test(contextRaw.trimStart());
+const hasContext = contextRaw.trim().length > 0 && !looksLikeLfsPointer;
+// The reason is derived from the actual state, in order, so the warning
+// never says "missing" about a file that is present but empty.
+const contextWhy = readError ? `unreadable (${readError})` : !contextExists ? 'missing' : looksLikeLfsPointer ? 'git-LFS pointer, not content' : 'empty';
+if (!hasContext) console.error(`[muscle] WARNING: no usable ${REVIEW_CONTEXT_PATH} (${contextWhy}) — reviewing with a generic brief and NO product invariants.`);
+const REVIEW_CONTEXT = hasContext ? contextRaw : [
   'WHAT TO ACTUALLY LOOK FOR: authorization that fails open; unbounded reads',
   'and silent truncation; swallowed catches and unawaited promises; exit 0 with',
   'no artifact; copy that promises what the code does not do; wrong hook usage,',
@@ -169,7 +187,7 @@ for (const model of ROSTER) {
   const shownContent = downgraded
     ? 'VERDICT: FINDINGS (downgraded from CLEAN: partial input — remainder unreviewed)' + (vm[2] ? ' ' + vm[2].replace(/[*_`]+$/, '') : '') + (nl === -1 ? '' : content.slice(nl))
     : content;
-  console.log(`\n═══ MUSCLE REVIEW · ${model} · ${shown}${truncated ? ' · PARTIAL' : ''} ═══\n`);
+  console.log(`\n═══ MUSCLE REVIEW · ${model} · ${shown}${truncated ? ' · PARTIAL' : ''}${hasContext ? '' : ' · GENERIC BRIEF (no product invariants)'} ═══\n`);
   if (truncated) console.log(`⚠️  PARTIAL REVIEW: ${cleaned.length - CAP} of ${cleaned.length} chars were NOT sent (cap ${CAP}). Whatever the text below says, this is NOT a pass: split the change and review the rest.\n`);
   console.log(shownContent);
   console.log(`\n─── usage: ${u.prompt_tokens} in / ${u.completion_tokens} out ───`);

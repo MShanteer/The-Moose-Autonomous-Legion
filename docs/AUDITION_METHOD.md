@@ -28,9 +28,22 @@ with your own domain; keep the discipline.
    pushback, and scored quotations of the wrong requirement as obedience.
    Every seat decision stood on the read-through.
 5. **Grade builders by execution, never by regex.** A hidden test harness,
-   validated against a reference implementation first. Every rule the spec
-   states gets a test — twice in the worked example a reviewer found a rule
-   the spec promised was graded and nothing exercised.
+   validated against a reference implementation first — the runner does this
+   itself before any API call, so a later no-RESULT can only be the
+   candidate's fault. Every rule the spec states gets a test — twice in the
+   worked example a reviewer found a rule the spec promised was graded and
+   nothing exercised. **And bind the grade to the harness, not to stdout:**
+   the harness writes a per-run nonce as its first line through a raw fd-1
+   write captured *before* it dynamically imports the candidate, and its
+   final RESULT line repeats the nonce through the same captured write; the
+   runner accepts a grade only with a matching nonce (exit status annotates
+   the grade, it does not veto it — a nonce-valid RESULT already proves the
+   suite ran to its last line), and the self-check is held to the same rule. A candidate that prints
+   `RESULT 19/19` at import, from an exit hook, before hanging, or by
+   monkeypatching `console.log` to read the nonce off the real line is not
+   graded — every one of those worked against the plain regex this replaced.
+   The harness is not a sandbox against a hostile module running in-process;
+   audition models you would ship, not adversaries.
 6. **Run the candidates in parallel, at temperature 0, and expect variance
    anyway.** One planner scored 3/5 then −2/5 by regex on identical input; on
    reading, both runs made the same core mistake. Two runs for contested seats.

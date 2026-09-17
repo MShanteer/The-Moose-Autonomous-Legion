@@ -2,7 +2,22 @@
 // sees this file; it sees only the spec in audition-impl.mjs. Prints
 // "RESULT <passed>/<total>" and the names of failures. Plain script on
 // purpose — no reporter to parse, no framework to mis-install.
-import { createCredentialService } from './credentials.mjs';
+// The candidate is imported DYNAMICALLY, after a per-run nonce has already
+// been written to stdout. The final RESULT line carries the same nonce, and
+// both lines are written through a raw fd-1 write captured BEFORE the import
+// — not console.log or process.stdout.write, which a candidate module can
+// monkeypatch at import time to read the nonce off the real RESULT line.
+// This defeats import-time prints, exit-hook prints, and console/stdout
+// interception. It is not a sandbox: a module hostile enough to patch fs
+// internals runs in-process and could still lie. Audition models you would
+// consider shipping; do not audition adversaries.
+import { randomUUID } from 'node:crypto';
+import { writeSync } from 'node:fs';
+const rawWrite = writeSync;                 // captured value, immune to later export mutation
+const emit = (s) => rawWrite(1, s + '\n');
+const NONCE = randomUUID();
+emit(`HARNESS START nonce=${NONCE}`);
+const { createCredentialService } = await import('./credentials.mjs');
 
 function makeDb() {
   const tables = {}; let n = 0;
@@ -126,10 +141,19 @@ test('issueRoomKey: revoked key for the stay does not block a new one', async ()
   const b = await f.svc.issueRoomKey(args); ok(a !== b, 'new key expected'); eq(f.db.list('credentials').length, 2);
 });
 
-let passed = 0; const failures = [];
+// FAIL lines are emitted AS THEY HAPPEN through the same captured raw write:
+// a run that dies mid-way still leaves the evidence of what failed before it
+// died, and a candidate that monkeypatches console.log cannot suppress them.
+// The RESULT line is led by a newline so a candidate's dangling stdout
+// (`process.stdout.write('loading…')` with no \n) cannot glue onto it and
+// break the runner's line anchor.
+let passed = 0;
 for (const t of tests) {
   try { await Promise.race([t.fn(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))]); passed++; }
-  catch (e) { failures.push(`${t.name} :: ${String(e && e.message || e).slice(0, 140)}`); }
+  catch (e) { emit(`\nFAIL ${t.name} :: ${String(e && e.message || e).slice(0, 140)}`); }
 }
-console.log(`RESULT ${passed}/${tests.length}`);
-for (const f of failures) console.log(`FAIL ${f}`);
+emit(`\nRESULT ${passed}/${tests.length} nonce=${NONCE}`);
+// Exit explicitly: a correct candidate that leaves a timer or socket open
+// would otherwise keep the process alive until the runner's cap kills it.
+// Everything above went through synchronous fd writes, so nothing is lost.
+process.exit(0);

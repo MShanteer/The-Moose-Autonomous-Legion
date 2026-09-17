@@ -15,7 +15,7 @@
 // the only audition where the grade is produced by execution, not by regex.
 
 import { resolveKey, GATEWAY } from '../../scripts/legion-key.mjs';
-import { mkdirSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, copyFileSync, writeSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -101,20 +101,90 @@ async function run(model, key) {
     const dir = path.join(ROOT, slug(model)); mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, 'credentials.mjs'), code);
     copyFileSync(new URL('./audition-impl.tests.mjs', import.meta.url), path.join(dir, 'tests.mjs'));
-    let out = '';
-    try { out = execSync(`node tests.mjs`, { cwd: dir, encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] }); }
-    catch (e) { out = (e.stdout || '') + '\nCRASH ' + String(e.stderr || e.message).split('\n').slice(0, 3).join(' | '); }
-    const r = out.match(/RESULT (\d+)\/(\d+)/);
-    // No RESULT line means the HARNESS did not run to completion (import
-    // crash, syntax error, missing node) — that is not a 0/19, it is no grade.
-    // Reported as a harness failure so a broken harness cannot masquerade as
-    // fifteen models that cannot build.
-    if (!r) return { model, err: `harness produced no RESULT line — ${out.trim().split('\n').slice(-2).join(' | ').slice(0, 200)}`, ms, u, harness: true };
+    // The cap must exceed the harness's own worst case (TOTAL tests × 3 s
+    // each) or a slow-but-partially-working module is killed before its
+    // RESULT line and loses the passes it earned.
+    const CAP_MS = TOTAL * 3000 + 5000;
+    let out = '', timedOut = false, crashed = false;
+    try { out = execSync(`node tests.mjs`, { cwd: dir, encoding: 'utf8', timeout: CAP_MS, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) {
+      crashed = true; // non-zero exit, signal, or timeout: annotated on a nonce-valid grade, never a veto
+      // Runtime signals only — never the message text, which embeds the
+      // candidate's own stdout/stderr ("throw new Error('timed out')" would lie).
+      timedOut = (e.signal === 'SIGTERM' && e.status === null) || e.code === 'ETIMEDOUT';
+      out = (e.stdout || '') + '\nCRASH ' + String(e.stderr || e.message).split('\n').slice(0, 3).join(' | ');
+    }
+    // A grade is accepted ONLY if the RESULT line carries the nonce the
+    // harness wrote as its FIRST line, through a raw fd write captured before
+    // the candidate was dynamically imported. A candidate cannot know that
+    // nonce, so import-time prints, exit-hook prints and console/stdout
+    // interception cannot be graded. Exit status does NOT veto a nonce-valid
+    // grade; it is annotated on it (see parseGrade).
+    const r = parseGrade(out);
+    // The harness already passed the reference (self-check above), so no
+    // RESULT here means the CANDIDATE's module failed to load or crashed —
+    // scored 0/TOTAL with the reason and ranked last; never blamed on the harness.
+    if (!r) {
+      // A hang is not a load failure; say which. Keep any FAIL lines the
+      // harness printed before dying — they are evidence of what did run.
+      const why = out.trim().split('\n').filter((l) => /error|crash/i.test(l)).slice(0, 2).join(' | ').slice(0, 200) || 'no RESULT line';
+      const ran = out.split('\n').filter((l) => l.startsWith('FAIL ')).map((l) => l.slice(0, 160));
+      const label = timedOut ? `TIMEOUT (candidate module hung or looped; ${Math.round(CAP_MS / 1000)} s cap)` : 'LOAD FAILURE (candidate module did not run to completion)';
+      return { model, ms, u, passed: 0, total: TOTAL, notGraded: true, fails: [`${label}: ${why}`, ...ran], dir, codeLen: code.length };
+    }
     const passed = Number(r[1]), total = Number(r[2]);
     const fails = out.split('\n').filter((l) => l.startsWith('FAIL ') || l.startsWith('CRASH')).map((l) => l.slice(0, 160));
+    if (crashed) fails.unshift(`NOTE: graded ${passed}/${total} from the nonce-bound RESULT, but the process did not exit cleanly afterwards (${timedOut ? `killed at the ${Math.round(CAP_MS / 1000)} s cap — an open handle?` : 'non-zero exit or signal'})`);
     return { model, ms, u, passed, total, fails, dir, codeLen: code.length };
   } catch (e) { return { model, err: String(e.message).slice(0, 100), ms: Date.now() - t0 }; }
 }
+
+// ── Harness self-check (invariant 18 in code) ────────────────────────────
+// Before a single API call, the hidden harness grades a KNOWN-GOOD reference
+// module. If that does not print RESULT N/N, the harness or the environment
+// is broken and the run stops here — so a no-RESULT from a candidate later
+// can only mean the CANDIDATE's module failed to load. A first cut of this
+// script classified every no-RESULT as a harness bug; with fifteen syntax-
+// broken candidates that would have told the operator to debug a working
+// harness.
+// ONE parser for both the self-check and every candidate: a grade exists only
+// if a RESULT line carries the nonce the harness wrote as its first line.
+// Exit status is NOT a veto — the nonce already proves the suite ran to its
+// last statement; a non-zero exit or a kill after that is annotated on the
+// grade, never used to discard it (a passing module that left a timer open
+// used to be scored 0 and labelled a hang). CRLF-tolerant. Match or null.
+function parseGrade(out) {
+  const startNonce = out.match(/^HARNESS START nonce=([0-9a-f-]{36})\r?$/m)?.[1];
+  if (!startNonce) return null;
+  return [...out.matchAll(/^RESULT (\d+)\/(\d+) nonce=([0-9a-f-]{36})\r?$/gm)].find((m) => m[3] === startNonce) ?? null;
+}
+const REFERENCE_MODULE ="export function createCredentialService(db, clock, audit) {\n  const H12 = 12 * 3600 * 1000;\n  return {\n    async canUnlock(id, door) {\n      try { const c = db.get('credentials', id); if (!c || c.propertyId !== door || c.status !== 'issued') return false; const t = clock(); return t >= c.validFrom && t <= c.validUntil; } catch { return false; }\n    },\n    async listCredentials(caller, propertyId) {\n      const ids = caller?.propertyIds ?? [];\n      if (propertyId !== undefined) { if (!ids.includes(propertyId)) throw new Error('forbidden'); return db.list('credentials', (r) => r.propertyId === propertyId).slice(0, 200); }\n      if (!ids.length) return [];\n      return db.list('credentials', (r) => ids.includes(r.propertyId)).slice(0, 200);\n    },\n    async revoke(id, actor, reason) {\n      try { if (!db.get('credentials', id)) throw new Error('not found'); db.patch('credentials', id, { status: 'revoked', revokedAt: clock(), revokedBy: actor, revokeReason: reason }); audit.write({ type: 'credential.revoked', credentialId: id, actor, reason, at: clock() }); return { ok: true }; }\n      catch (e) { return { ok: false, error: String(e?.message ?? e) }; }\n    },\n    async issueEventPass({ propertyId, eventId, attendee, issuedBy, marketingConsent }) {\n      const profileId = db.insert('profiles', { propertyId, name: attendee.name, phone: attendee.phone });\n      if (marketingConsent === true) db.insert('consents', { profileId, propertyId, channel: 'marketing', optIn: true, source: 'event-pass', at: clock() });\n      const validFrom = clock();\n      const id = db.insert('credentials', { propertyId, guestId: profileId, kind: 'event', status: 'issued', validFrom, validUntil: validFrom + H12, issuedBy, eventId });\n      audit.write({ type: 'credential.issued', credentialId: id, actor: issuedBy, at: clock() });\n      return id;\n    },\n    async issueRoomKey({ propertyId, guestId, stayId, validFrom, validUntil, issuedBy }) {\n      const existing = db.list('credentials', (r) => r.stayId === stayId && r.status === 'issued')[0];\n      if (existing) return existing._id;\n      const id = db.insert('credentials', { propertyId, guestId, stayId, kind: 'room', status: 'issued', validFrom, validUntil, issuedBy });\n      audit.write({ type: 'credential.issued', credentialId: id, actor: issuedBy, at: clock() });\n      return id;\n    },\n  };\n}\n";
+function selfCheck() {
+  const dir = path.join(ROOT, '_reference'); mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'credentials.mjs'), REFERENCE_MODULE);
+  copyFileSync(new URL('./audition-impl.tests.mjs', import.meta.url), path.join(dir, 'tests.mjs'));
+  let out = '', crashed = false;
+  // TOTAL is what this call discovers, so the cap cannot be derived from it;
+  // give the reference a budget no candidate cap will exceed (a slow CI box
+  // must never turn a working harness into "SELF-CHECK FAILED").
+  const SELF_CHECK_MS = 180000;
+  try { out = execSync('node tests.mjs', { cwd: dir, encoding: 'utf8', timeout: SELF_CHECK_MS, stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (e) { crashed = true; out = (e.stdout || '') + '\n' + String(e.stderr || e.message); }
+  const r = parseGrade(out); // same nonce-bound acceptance as every candidate
+  // A harness that ran ZERO tests (empty/truncated tests file) prints
+  // RESULT 0/0 — equal, but graded nothing. That is a broken harness.
+  if (!r || Number(r[2]) === 0 || Number(r[1]) !== Number(r[2])) {
+    // Synchronous fd-2 writes, then exit: console.error before process.exit
+    // can lose the very diagnostics this branch exists to deliver when
+    // stderr is a pipe (CI, `2>&1 | tee`).
+    writeSync(2, '[audition-impl] HARNESS SELF-CHECK FAILED: the reference module did not pass the harness. Either the harness/environment is broken OR the embedded REFERENCE_MODULE no longer matches the tests — check both. No candidate was graded.\n');
+    writeSync(2, out.trim().split('\n').slice(-6).join('\n') + (crashed ? '\n(harness process did not exit cleanly)' : '') + '\n');
+    process.exit(1);
+  }
+  console.error('[audition-impl] harness self-check: reference module ' + r[0]);
+  return Number(r[2]);
+}
+const TOTAL = selfCheck();
 
 const { key } = resolveKey();
 console.error(`[audition-impl] ${CANDIDATES.length} candidates → ${ROOT}`);
@@ -130,12 +200,11 @@ console.log('\n===== FAILURES =====');
 for (const r of results) if (!r.err && r.fails.length) console.log(`\n--- ${r.model} (${r.passed}/${r.total}) ---\n${r.fails.join('\n')}`);
 console.log(`\nmodules kept at ${ROOT}`);
 
-const graded = results.filter((r) => !r.err).length;
-const harnessFails = results.filter((r) => r.harness).length;
-if (graded === 0 && harnessFails > 0) {
-  console.error(`\n[audition-impl] the harness printed no RESULT for ANY of ${harnessFails} candidate(s). This is a harness/environment bug, not a model result. Run the harness against a reference implementation first.`);
-  process.exitCode = 1;
-} else if (graded === 0) {
-  console.error('\n[audition-impl] nobody produced runnable code — failed run, not a result.');
+const answered = results.filter((r) => !r.err).length;
+const notGraded = results.filter((r) => r.notGraded).length;
+const graded = answered - notGraded;
+if (notGraded) console.error('\n[audition-impl] ' + notGraded + ' candidate(s) produced a module that did not run to completion (load failure or timeout) — scored 0/' + TOTAL + ', reasons in FAILURES.');
+if (graded === 0) {
+  console.error('\n[audition-impl] nobody produced gradeable code (every candidate: no output, no code block, transport failure, or a module that did not run) — failed run, not a result.');
   process.exitCode = 1;
 }
