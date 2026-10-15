@@ -178,6 +178,14 @@ review you stop rationing verification: every lane gets an adversarial pass,
 disagreements get a third opinion, and the swarm can afford to be wrong out
 loud. That is worth more than any single model upgrade.
 
+### Implementation lanes on free models
+
+Lanes are the expensive part of a Legion run. Fenced lanes (a spec, a file list, a
+failing test to write first) can run as headless Claude Code agents on free gateway
+models and be accepted only by a no-token gate plus a second-lineage review; the
+orchestrator keeps planning, merging, security-shaped lanes and screenshot judgement.
+Scripts, measured models and the routing table: [examples/zenmux-agent-lanes/](examples/zenmux-agent-lanes/README.md).
+
 ## Design lineage
 
 Synthesized from an evaluation of five public multi-agent systems:
