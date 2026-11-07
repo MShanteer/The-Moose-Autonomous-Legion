@@ -1,45 +1,60 @@
 #!/usr/bin/env node
 // ══ LEGION CHECK — prove the gates can run before you need them ═════════
 //
-//   npm run legion:check
+//   npm run legion:check          free: key source, KIE balance, every roster model against KIE's listings
+//   npm run legion:check -- --live  also one tiny real call per rostered model (spends KIE credits)
 //
-// One GET /models settles the key question in a single step: 200 means the
-// key is good; if models lists but chat 403s later, you are sending a
-// different key than you think. Warns when a ZENMUX_API_KEY is exported at OS
-// level (the stale-key trap). Prints where the key came from, never the key.
+// Listing a model does not prove it will answer; --live does.
+// Prints where the key came from, never the key.
 
-import { resolveKey, keyCandidates, BRAIN_ROSTER, BRAIN_SECOND_ROSTER, MUSCLE_ROSTER, SECOND_ROSTER, IMPL_ROSTER, GATEWAY } from './legion-key.mjs';
+import { keyCandidates, BRAIN_ROSTER, BRAIN_SECOND_ROSTER, MUSCLE_ROSTER, SECOND_ROSTER, IMPL_ROSTER } from './legion-key.mjs';
+import { askKie, hasKieCredits, isKie, kieCredits, kieId, listKieModels, resolveKieKeySource } from './legion-kie.mjs';
 import { existsSync } from 'node:fs';
 
-const ROSTER = [...new Set([...BRAIN_ROSTER, ...BRAIN_SECOND_ROSTER, ...MUSCLE_ROSTER, ...SECOND_ROSTER, ...IMPL_ROSTER])];
+const live = process.argv.includes('--live');
+const SEATS = [['brain', BRAIN_ROSTER], ['brain 2nd', BRAIN_SECOND_ROSTER], ['muscle', MUSCLE_ROSTER], ['muscle 2nd', SECOND_ROSTER], ['impl lanes', IMPL_ROSTER]];
+const ROSTER = [...new Set(SEATS.flatMap(([, r]) => r))];
 const say = (s) => console.log(s);
 say('🦌  Legion gate check');
 say('------------------------------------------------------------');
-say(`gateway    : ${GATEWAY}`);
-say(`brain      : ${BRAIN_ROSTER.join('  →  ')}`);
-say(`brain 2nd  : ${BRAIN_SECOND_ROSTER.join('  →  ')}   (npm run brain -- --second)`);
-say(`muscle     : ${MUSCLE_ROSTER.join('  →  ')}`);
-say(`muscle 2nd : ${SECOND_ROSTER.join('  →  ')}   (npm run muscle -- --second)`);
-say(`impl lanes : ${IMPL_ROSTER.join('  →  ')}   (coding-legion one-shot lanes)`);
+for (const [seat, r] of SEATS) say(`${seat.padEnd(11)}: ${r.join('  →  ')}`);
 for (const p of keyCandidates()) say(`${existsSync(p) ? '✅' : '  '} candidate ${p}`);
-if (process.env.ZENMUX_API_KEY) say('⚠️  ZENMUX_API_KEY is exported at OS level — scripts prefer the file; if no file has a key, THIS one is used and may be stale.');
 
-let k;
-try { k = resolveKey(); } catch (e) { say(`❌ ${e.message}`); process.exit(1); }
-say(`key        : from ${k.source}`);
+const available = new Set();
+let failed = false;
+const fail = (s) => { failed = true; say(`❌ ${s}`); };
 
-const res = await fetch(`${GATEWAY}/models`, { headers: { authorization: `Bearer ${k.key}` } });
-if (!res.ok) {
-  say(`❌ GET /models -> HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
-  say('   403 access_denied with a file-resolved key means THAT key is dead; with an env-resolved key it means a stale OS-level key.');
-  process.exitCode = 1;
-} else {
-  const d = await res.json();
-  const ids = new Set((d.data ?? d.models ?? []).map((m) => m.id ?? m.name).filter(Boolean));
-  say(`✅ GET /models -> 200 (${ids.size} models)`);
-  let missing = 0;
-  for (const m of ROSTER) { const ok = ids.has(m); if (!ok) missing++; say(`${ok ? '✅' : '❌'} roster model ${m}${ok ? '' : ' NOT listed — fallback will skip it'}`); }
-  say('------------------------------------------------------------');
-  say(missing === ROSTER.length ? '❌ No roster model is available. Fix the LEGION_*_ROSTER vars before running a gate.' : 'Gates are runnable:  npm run brain "…"   |   npm run muscle');
-  process.exitCode = missing === ROSTER.length ? 1 : 0;
+for (const m of ROSTER.filter((x) => !isKie(x))) fail(`roster entry ${m} is not on KIE: use kie:<model>`);
+
+if (ROSTER.some(isKie)) {
+  try {
+    const { key, source } = resolveKieKeySource();
+    say(`KIE key    : from ${source}`);
+    const credits = await kieCredits({ key });
+    if (hasKieCredits(credits)) say(`✅ KIE credits: ${credits} (shared by every model and every session on this key)`);
+    else fail(`KIE credits: ${JSON.stringify(credits)}. The gates need a positive balance, shared by every model and every session on this key.`);
+    const ids = await listKieModels({ key });
+    say(`✅ KIE listings -> ${ids.size} models (/openai/v1/models + /anthropic/v1/models)`);
+    for (const m of ROSTER.filter(isKie)) {
+      if (ids.has(kieId(m))) available.add(m);
+      say(`${ids.has(kieId(m)) ? '✅' : '❌'} roster model ${m}${ids.has(kieId(m)) ? '' : ' NOT listed — fallback will skip it'}`);
+    }
+  } catch (e) { fail(`KIE: ${String(e.message).slice(0, 240)}`); }
 }
+
+const ping = (m) => askKie(m, { system: 'Answer briefly.', user: 'Reply with the single word: pong', maxTokens: 2000, effort: 'low' });
+
+if (live) {
+  say('--- live ping (1 tiny real call per rostered model, one at a time) ---');
+  for (const m of [...available]) {
+    const t0 = Date.now();
+    try { await ping(m); say(`✅ ${m} ${((Date.now() - t0) / 1000).toFixed(1)}s`); }
+    catch (e) { available.delete(m); say(`❌ ${m} ${String(e.message).slice(0, 160)}`); }
+  }
+}
+
+say('------------------------------------------------------------');
+// Each seat must keep a model: one dead seat is a gate that cannot run.
+for (const [seat, r] of SEATS) if (!r.some((m) => available.has(m))) fail(`No ${seat} model is available. Fix the key or the LEGION_*_ROSTER vars before running that gate.`);
+if (!failed) say('Gates are runnable:  npm run brain "…"   |   npm run muscle   |   npm run muscle -- --second');
+process.exitCode = failed ? 1 : 0;

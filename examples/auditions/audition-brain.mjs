@@ -15,14 +15,10 @@
 // on. Rubric fixed before any output is read; a plan that obeys a trap is
 // scored against, not for. Read every output anyway — the score is triage.
 
-import { resolveKey, GATEWAY } from '../../scripts/legion-key.mjs';
+import { askKie, resolveKieKey } from '../../scripts/legion-kie.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 
-const DEFAULT_CANDIDATES = [
-  'openai/gpt-5-nano', 'openai/gpt-5-mini', 'openai/gpt-5.4-nano', 'openai/gpt-5.6-luna',
-  'deepseek/deepseek-v4.1-flash', 'qwen/qwen3.8-flash', 'z-ai/glm-5.3-flash', 'tencent/hy3',
-  'inclusionai/ling-3.0-flash', 'qwen/qwen3-235b-a22b-thinking-2507',
-];
+const DEFAULT_CANDIDATES = ['kie:gpt-6-luna', 'kie:gpt-6.1-sol', 'kie:claude-sonnet-5-5', 'kie:claude-haiku-5-5'];
 // `--` is passed through verbatim when invoked with `node` directly (npm strips it); drop it.
 const ARGS = process.argv.slice(2).filter((a) => a !== '--');
 const CANDIDATES = ARGS[0] ? ARGS[0].split(',').map((s) => s.trim()).filter(Boolean) : DEFAULT_CANDIDATES;
@@ -136,23 +132,14 @@ const NEG_NEAR = (text, re) => {
 };
 const PROVIDED_FILES = ['convex/schema.ts', 'lib/credentials.ts', 'lib/scope.ts'];
 
+// One at a time: Claude on KIE answers 503 under parallel load.
+async function sequentially(items, fn) { const out = []; for (const x of items) out.push(await fn(x)); return out; }
+
 async function run(model, key) {
   const t0 = Date.now();
   try {
-    const res = await fetch(`${GATEWAY}/chat/completions`, {
-      method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, temperature: 0, max_tokens: MAX_TOKENS, reasoning_effort: EFFORT,
-        messages: [
-          { role: 'system', content: SYSTEM },
-          { role: 'user', content: `${TASK}\n\nPRODUCT BRIEF:\n${BRIEF}\n\nRELEVANT SOURCE:${SOURCE}` },
-        ] }),
-    });
+    const { content: text, usage: u } = await askKie(model, { system: SYSTEM, user: `${TASK}\n\nPRODUCT BRIEF:\n${BRIEF}\n\nRELEVANT SOURCE:${SOURCE}`, maxTokens: MAX_TOKENS, effort: EFFORT }, { key });
     const ms = Date.now() - t0;
-    if (!res.ok) return { model, err: `HTTP ${res.status} ${(await res.text()).slice(0, 100)}`, ms };
-    const j = await res.json();
-    const text = j.choices?.[0]?.message?.content?.trim() ?? '';
-    const u = j.usage ?? {};
-    if (!text) return { model, err: `EMPTY (reasoning_tokens=${u.completion_tokens_details?.reasoning_tokens ?? '?'})`, ms, u };
     const hits = Object.fromEntries(Object.entries(R).map(([k, re]) => [k, re.test(text)]));
     // No special-casing: flagging the device clock (T1) does not excuse still
     // sweeping on it (F1). A plan can do both, and hy3 pointed out the old
@@ -164,9 +151,9 @@ async function run(model, key) {
   } catch (e) { return { model, err: String(e.message).slice(0, 100), ms: Date.now() - t0 }; }
 }
 
-const { key } = resolveKey();
+const key = resolveKieKey();
 console.error(`[audition-brain] ${CANDIDATES.length} candidates, effort=${EFFORT}, max_tokens=${MAX_TOKENS}`);
-const results = await Promise.all(CANDIDATES.map((m) => run(m, key)));
+const results = await sequentially(CANDIDATES, (m) => run(m, key));
 
 console.log('model | T1 clock | T2 cron | T3 uniq-idx | T4 consent | T5 residency | FPs (obeyed a trap) | grounded files | invented src/ | in/out tok | sec | score');
 for (const r of results) {

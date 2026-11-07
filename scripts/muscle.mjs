@@ -24,7 +24,8 @@
 //     passes it took to get it right;
 //   - no model answering is a FAILURE, never CLEAN.
 
-import { resolveKey, MUSCLE_ROSTER, SECOND_ROSTER, rosterFromArgv, GATEWAY } from './legion-key.mjs';
+import { MUSCLE_ROSTER, SECOND_ROSTER, rosterFromArgv } from './legion-key.mjs';
+import { CREDITS_ADVICE, askKie, isOutOfCredits } from './legion-kie.mjs';
 import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -128,7 +129,6 @@ const body = {
         sent,
     },
   ],
-  temperature: 0,
   // 24k, not 16k: max_tokens caps reasoning + content together, and a 44k-char
   // diff once cut a finding mid-sentence at exactly 16,000 output tokens.
   max_tokens: 24000,
@@ -136,28 +136,21 @@ const body = {
 };
 
 let reviewed = false;
-const { key, source } = resolveKey();
-console.error(`[muscle] key from ${source}; roster ${ROSTER.join(' → ')}; diff ${cleaned.length} chars${cleaned.length > CAP ? ` (TRUNCATED to ${CAP} — review in smaller commits)` : ''}`);
+console.error(`[muscle] roster ${ROSTER.join(' → ')}; diff ${cleaned.length} chars${cleaned.length > CAP ? ` (TRUNCATED to ${CAP} — review in smaller commits)` : ''}`);
 
 for (const model of ROSTER) {
-  // Everything that can reject — the fetch, a 200 with an HTML body, JSON
-  // parsing — is caught per model so the roster fallback actually happens.
-  // brain.mjs always did this; the first cut of this loop did not.
+  // Everything that can reject, a stream cut short included, is caught per model
+  // so the roster fallback actually happens. askKie refuses an empty or unfinished
+  // answer, so a max-tokens cut can never reach the VERDICT gate.
   let content, u;
   try {
-    const res = await fetch(`${GATEWAY}/chat/completions`, {
-      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({ ...body, model }),
-    });
-    if (!res.ok) { console.error(`[skip] ${model} -> HTTP ${res.status} ${(await res.text()).slice(0, 160)}`); continue; }
-    const json = await res.json();
-    content = json.choices?.[0]?.message?.content?.trim();
-    u = json.usage ?? {};
+    ({ content, usage: u } = await askKie(model, { system: body.messages[0].content, user: body.messages[1].content, maxTokens: body.max_tokens, effort: body.reasoning_effort }));
   } catch (err) {
-    console.error(`[skip] ${model} -> ${String(err?.message ?? err).slice(0, 160)}`);
+    const msg = String(err?.message ?? err);
+    console.error(`[skip] ${model} -> ${msg.slice(0, 200)}`);
+    if (isOutOfCredits(msg)) { console.error(`[muscle] ${CREDITS_ADVICE}`); break; } // shared balance: the next model gets 402 too
     continue;
   }
-  if (!content) { console.error(`[skip] ${model} -> empty content (reasoning_tokens=${u.completion_tokens_details?.reasoning_tokens ?? '?'})`); continue; }
 
   // THE VERDICT GATE. A review is a verdict-shaped artifact: the FIRST line
   // is the verdict (markdown and list markers stripped, trailing prose

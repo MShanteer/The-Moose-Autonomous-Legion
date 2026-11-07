@@ -67,8 +67,8 @@ Then in a Claude Code session: `/coding-legion` — or just say
 
 ### The gates are runnable, not just written
 
-`scripts/` holds the PLANNER and REVIEWER as one-command Node scripts against
-any OpenAI-compatible gateway (ZenMux by default). A doctrine you cannot
+`scripts/` holds the PLANNER and REVIEWER as one-command Node scripts on
+[KIE](https://kie.ai). A doctrine you cannot
 execute in one command is a doctrine that gets skipped, and every defect the
 production repos shipped came from skipping it.
 
@@ -151,6 +151,37 @@ three files they named, so moving a billing call into an *imported helper* would
 walk straight past them. Those guards had been mutation-tested and every one
 fired. **A green suite proves the assertions you wrote, not the property you
 meant** — which is worth asking your reviewer to attack directly.
+
+### The standard: KIE
+
+KIE is the gateway for both gates. `scripts/legion-kie.mjs` is the only transport, and a
+roster entry is `kie:<model>`.
+
+- **GPT-6 Luna plans.** It is the Brain.
+- **GPT-6.1 Sol reviews and enhances.** It is the Muscle reviewer, leads enhancement passes, above all UI/UX, and is the Artist in The Legions Art.
+- **Independence rule.** When Sol wrote or rewrote the code, a different model family must also review it (`npm run muscle -- --second`). Sol never signs off its own work alone.
+- **A gate is a second opinion.** Verify every finding against the code, then fix or reject it explicitly.
+
+| Seat | Roster (first that answers wins) | Measured 2026-11-05, one small seeded test |
+|---|---|---|
+| Brain | `kie:gpt-6-luna` → `kie:gpt-6.1-sol` | Luna planner 4/5, the best; Sol 2/5 |
+| Brain, second lineage (`--second`) | `kie:claude-sonnet-5-5` → `kie:claude-haiku-5-5` | Sonnet planner 3/5 |
+| Muscle | `kie:gpt-6.1-sol` → `kie:claude-sonnet-5-5` → `kie:claude-haiku-5-5` | each reviewer 4/4 |
+| Muscle, second lineage (`--second`) | `kie:claude-sonnet-5-5` → `kie:claude-haiku-5-5` | each reviewer 4/4 |
+| Implementation one-shots (advisory, nothing dispatches to it) | `kie:gpt-6.1-sol` → `kie:gpt-6-luna` | owner's pick for enhancement passes |
+
+These scores come from one small seeded test on one product: a first sort. Re-audition on your
+own domain.
+
+- **Always stream.** KIE has no chat-completions route for GPT models, and a long unstreamed call dies as a Cloudflare 502.
+- **Claude on KIE answers 503 under parallel load** (measured: 1 of 8 concurrent calls got through, Sol 8 of 8). The client retries three times; run Claude calls one at a time. Claude Code agents do not run through KIE.
+- **The balance is shared** by every model and every session on the key, so a balance check is not a per-session cap.
+- **HTTP 402 stops the roster at once.** Every model draws on the same balance. Tell the owner; do not retry.
+- **Empty or cut output is not approval.** `max_tokens` covers reasoning plus content. The client treats empty content, a max-tokens cut and a dropped stream as failures, even when the text so far says `VERDICT: CLEAN`.
+- **File before environment.** A stale exported key once answered 403 and read like a revoked key. The scripts read `.env.local` first. Prove it with `npm run legion:check`.
+
+The rosters and prices below record earlier auditions on a previous gateway. Keep the lessons;
+do not copy the model names.
 
 ### The roster: cheap brain, free muscle, paid by exception
 

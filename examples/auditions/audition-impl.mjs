@@ -14,18 +14,13 @@
 // harness (audition-impl.tests.mjs, 19 cases). Score = tests passed. This is
 // the only audition where the grade is produced by execution, not by regex.
 
-import { resolveKey, GATEWAY } from '../../scripts/legion-key.mjs';
+import { askKie, resolveKieKey } from '../../scripts/legion-kie.mjs';
 import { mkdirSync, writeFileSync, copyFileSync, writeSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 
-const DEFAULT_CANDIDATES = [
-  'deepseek/deepseek-v4.1-flash', 'qwen/qwen3.8-flash', 'qwen/qwen3.7-flash', 'inclusionai/ling-3.0-flash',
-  'z-ai/glm-5.3-flash', 'z-ai/glm-4.7-flash-free', 'xiaomi/mimo-v2.5', 'bytedance/doubao-seed-2.0-mini',
-  'meta/muse-spark-1.3-contributor', 'tencent/hy3', 'google/gemini-2.5-flash-lite', 'stepfun/step-3.5-flash',
-  'sapiens-ai/agnes-2.5-flash', 'openai/gpt-5-nano', 'openai/gpt-5.4-nano',
-];
+const DEFAULT_CANDIDATES = ['kie:gpt-6-luna', 'kie:gpt-6.1-sol', 'kie:claude-sonnet-5-5', 'kie:claude-haiku-5-5'];
 // `--` is passed through verbatim when invoked with `node` directly (npm strips it); drop it.
 const ARGS = process.argv.slice(2).filter((a) => a !== '--');
 const CANDIDATES = ARGS[0] ? ARGS[0].split(',').map((s) => s.trim()).filter(Boolean) : DEFAULT_CANDIDATES;
@@ -75,23 +70,14 @@ const slug = (m) => m.replace(/[^a-z0-9]+/gi, '_');
 const ROOT = path.join(os.tmpdir(), `amazeng-impl-audition-${Date.now()}`);
 mkdirSync(ROOT, { recursive: true });
 
+// One at a time: Claude on KIE answers 503 under parallel load.
+async function sequentially(items, fn) { const out = []; for (const x of items) out.push(await fn(x)); return out; }
+
 async function run(model, key) {
   const t0 = Date.now();
   try {
-    const res = await fetch(`${GATEWAY}/chat/completions`, {
-      method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, temperature: 0, max_tokens: 16000, reasoning_effort: 'low',
-        messages: [
-          { role: 'system', content: 'You are a senior JavaScript engineer. Implement exactly the spec. Return one fenced js code block and nothing else.' },
-          { role: 'user', content: SPEC },
-        ] }),
-    });
+    const { content: text, usage: u } = await askKie(model, { system: 'You are a senior JavaScript engineer. Implement exactly the spec. Return one fenced js code block and nothing else.', user: SPEC, maxTokens: 16000, effort: 'low' }, { key });
     const ms = Date.now() - t0;
-    if (!res.ok) return { model, err: `HTTP ${res.status} ${(await res.text()).slice(0, 100)}`, ms };
-    const j = await res.json();
-    const text = j.choices?.[0]?.message?.content?.trim() ?? '';
-    const u = j.usage ?? {};
-    if (!text) return { model, err: `EMPTY (reasoning_tokens=${u.completion_tokens_details?.reasoning_tokens ?? '?'})`, ms, u };
     const code = extractModule(text);
     if (!code) {
       // Keep the evidence: the raw output is the only record of what the model produced.
@@ -186,9 +172,9 @@ function selfCheck() {
 }
 const TOTAL = selfCheck();
 
-const { key } = resolveKey();
+const key = resolveKieKey();
 console.error(`[audition-impl] ${CANDIDATES.length} candidates → ${ROOT}`);
-const results = await Promise.all(CANDIDATES.map((m) => run(m, key)));
+const results = await sequentially(CANDIDATES, (m) => run(m, key));
 results.sort((a, b) => (b.passed ?? -1) - (a.passed ?? -1) || (a.ms - b.ms));
 
 console.log('model | tests passed | code chars | in/out tok | sec');
