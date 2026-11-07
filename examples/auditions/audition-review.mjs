@@ -8,21 +8,15 @@
 //   node examples/auditions/audition-review.mjs                       # default candidate list
 //   node examples/auditions/audition-review.mjs -- model/a,model/b    # your own candidates
 //
-// Seeded-bug audition of ZenMux models as AMAZENG reviewers. The rubric is
+// Seeded-bug audition of models as AMAZENG reviewers. The rubric is
 // fixed BEFORE any output is read; false positives on the decoy count against
 // the model as hard as misses. Re-run whenever a model is added or the roster
 // is questioned. Results: docs/AUDITION_METHOD.md.
 // Cost: ~$0.01 for the whole candidate list.
 // Four planted defects + one decoy that a good reviewer must NOT flag.
-import { resolveKey, GATEWAY } from '../../scripts/legion-key.mjs';
+import { askKie, resolveKieKey } from '../../scripts/legion-kie.mjs';
 
-const DEFAULT_CANDIDATES = [
-  'openai/gpt-5-nano', 'qwen/qwen3.7-flash', 'qwen/qwen3.8-flash',
-  'deepseek/deepseek-v4.1-flash', 'inclusionai/ling-3.0-flash', 'z-ai/glm-5.3-flash',
-  'xiaomi/mimo-v2.5', 'sapiens-ai/agnes-2.5-flash', 'google/gemini-2.5-flash-lite',
-  'bytedance/doubao-seed-2.0-mini', 'meta/muse-spark-1.3-contributor', 'z-ai/glm-4.7-flash-free',
-  'stepfun/step-3.5-flash', 'tencent/hy3',
-];
+const DEFAULT_CANDIDATES = ['kie:gpt-6-luna', 'kie:gpt-6.1-sol', 'kie:claude-sonnet-5-5', 'kie:claude-haiku-5-5'];
 
 const DIFF = `diff --git a/lib/credentials.ts b/lib/credentials.ts
 new file mode 100644
@@ -102,20 +96,14 @@ const RUBRIC = {
 };
 const FALSE_POS = /issueRoomKey[\s\S]{0,500}(race|unique|duplicate|concurren)|(race condition|unique index)[\s\S]{0,300}issueRoomKey/i;
 
+// One at a time: Claude on KIE answers 503 under parallel load.
+async function sequentially(items, fn) { const out = []; for (const x of items) out.push(await fn(x)); return out; }
+
 async function run(model, key) {
   const t0 = Date.now();
   try {
-    const res = await fetch(`${GATEWAY}/chat/completions`, {
-      method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, temperature: 0, max_tokens: 12000, reasoning_effort: 'low',
-        messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: USER }] }),
-    });
+    const { content: text, usage: u } = await askKie(model, { system: SYSTEM, user: USER, maxTokens: 12000, effort: 'low' }, { key });
     const ms = Date.now() - t0;
-    if (!res.ok) return { model, err: `HTTP ${res.status} ${(await res.text()).slice(0, 80)}`, ms };
-    const j = await res.json();
-    const text = j.choices?.[0]?.message?.content?.trim() ?? '';
-    const u = j.usage ?? {};
-    if (!text) return { model, err: `EMPTY (reasoning_tokens=${u.completion_tokens_details?.reasoning_tokens ?? '?'})`, ms, u };
     const hits = Object.fromEntries(Object.entries(RUBRIC).map(([k, re]) => [k, re.test(text)]));
     // Only explicit negations clear a decoy hit. "correct" was in this list once
     // and "the correct fix is a unique index" cleared a real false positive
@@ -134,9 +122,9 @@ async function run(model, key) {
 // `--` is passed through verbatim when invoked with `node` directly (npm strips it); drop it.
 const ARGS = process.argv.slice(2).filter((a) => a !== '--');
 const CANDIDATES = ARGS[0] ? ARGS[0].split(',').map((s) => s.trim()).filter(Boolean) : DEFAULT_CANDIDATES;
-const { key } = resolveKey();
+const key = resolveKieKey();
 console.error(`[audition] ${CANDIDATES.length} candidates, 1 seeded diff each`);
-const results = await Promise.all(CANDIDATES.map((m) => run(m, key)));
+const results = await sequentially(CANDIDATES, (m) => run(m, key));
 console.log('model | B1 expiry | B2 fail-open | B3 swallow | B4 consent | FALSE-POS on decoy | said CLEAN | out tok | sec | score (hits − FP)');
 for (const r of results) {
   if (r.err) { console.log(`${r.model} | FAILED: ${r.err} | ${(r.ms / 1000).toFixed(1)}s`); continue; }

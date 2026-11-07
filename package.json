@@ -7,6 +7,7 @@
   "license": "MIT",
   "engines": { "node": ">=20" },
   "scripts": {
+    "test": "node --test scripts/test/*.test.mjs",
     "legion:check": "node scripts/legion-check.mjs",
     "brain": "node scripts/brain.mjs",
     "muscle": "node scripts/muscle.mjs",

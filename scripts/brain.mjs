@@ -23,7 +23,8 @@
 // whole max_tokens budget thinking and return "" on big prompts. Always send
 // reasoning_effort: low (or medium for planning) and give headroom.
 
-import { resolveKey, BRAIN_ROSTER, BRAIN_SECOND_ROSTER, rosterFromArgv, GATEWAY } from './legion-key.mjs';
+import { BRAIN_ROSTER, BRAIN_SECOND_ROSTER, rosterFromArgv } from './legion-key.mjs';
+import { CREDITS_ADVICE, askKie, isOutOfCredits } from './legion-kie.mjs';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 
 // docs/CONTEXT_BRIEF.md, or any docs/*CONTEXT_BRIEF*.md (repos tend to prefix
@@ -91,34 +92,26 @@ const SYSTEM = [
   existsSync(CONSTRAINTS) ? `\nCONSTRAINTS OF THIS CODEBASE — a plan that violates these is wrong:\n${readFileSync(CONSTRAINTS, 'utf8')}` : '',
 ].join('\n');
 
-async function ask(model, key) {
-  const res = await fetch(`${GATEWAY}/chat/completions`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model, reasoning_effort: process.env.LEGION_BRAIN_EFFORT ?? 'low', max_tokens: 16000, temperature: 0,
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: context ? `${task}\n\nRELEVANT SOURCE:${context}` : task },
-      ],
-    }),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${model} → HTTP ${res.status}: ${text.slice(0, 300)}`);
-  const j = JSON.parse(text);
-  const content = j?.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error(`${model} returned an EMPTY plan (reasoning ceiling)`);
-  return { content, usage: j?.usage, model };
-}
+const ask = (model) => askKie(model, {
+  system: SYSTEM,
+  user: context ? `${task}
 
-const { key, source } = resolveKey();
-console.error(`[brain] key from ${source}; roster ${ROSTER.join(' → ')}; brief ${existsSync(BRIEF) ? BRIEF : '(none)'}; ${files.length} file(s) inlined`);
+RELEVANT SOURCE:${context}` : task,
+  maxTokens: 16000,
+  effort: process.env.LEGION_BRAIN_EFFORT ?? 'low',
+});
+
+console.error(`[brain] roster ${ROSTER.join(' → ')}; brief ${existsSync(BRIEF) ? BRIEF : '(none)'}; ${files.length} file(s) inlined`);
 
 let out = null;
 const failures = [];
 for (const m of ROSTER) {
-  try { out = await ask(m, key); break; }
-  catch (err) { failures.push(String(err.message ?? err)); }
+  try { out = await ask(m); break; }
+  catch (err) {
+    const msg = String(err.message ?? err);
+    failures.push(msg);
+    if (isOutOfCredits(msg)) { failures.push(CREDITS_ADVICE); break; } // shared balance: the next model gets 402 too
+  }
 }
 
 if (!out) {

@@ -1,6 +1,6 @@
 ---
 name: coding-legion
-description: Parallel agent swarm for the AMAZENG repo — shard a Brain (ZenMux Legion) plan into dependency-ordered, file-disjoint lanes, execute them with parallel Claude subagents, gate completion on evidence, and muscle-review the merged diff before shipping. Use when the owner says "coding legion", "swarm this", "parallelize", "run lanes", or a Brain plan has 3+ independent increments. Composes Brain→Claude→Lanes→Muscle; never replaces the Brain.
+description: Parallel agent swarm for the AMAZENG repo — shard a Brain (Legion on KIE) plan into dependency-ordered, file-disjoint lanes, execute them with parallel Claude subagents, gate completion on evidence, and muscle-review the merged diff before shipping. Use when the owner says "coding legion", "swarm this", "parallelize", "run lanes", or a Brain plan has 3+ independent increments. Composes Brain→Claude→Lanes→Muscle; never replaces the Brain.
 ---
 
 # 🦌 Coding Legion — parallel lanes under the Brain & Muscle model (AMAZENG)

@@ -1,5 +1,7 @@
 # Seat by measurement: the three-audition method
 
+> **2026-11-05:** the gates moved to KIE. The method here still applies. The result tables are history; the current roster is in the README.
+
 The README's roster section was written after one product cycle and named the
 models that worked there. The next domain — a hotel digital-key system,
 2026-09-15 — overturned it in an afternoon. The proven reviewer scored 1 of 4
