@@ -52,3 +52,7 @@ test('only a positive number is a usable balance', () => {
   assert.equal(hasKieCredits(0), false);
   assert.equal(hasKieCredits('5'), false);
 });
+test('a terminal event with no status still finishes on its event type', async () => {
+  const d = deps(new Response(sse([gptDelta, { type: 'response.completed', response: {} }])));
+  assert.equal((await askKie('kie:gpt-6.1-sol', REQ, d)).content, 'VERDICT: CLEAN\nbody');
+});

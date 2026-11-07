@@ -21,6 +21,7 @@ for (const [seat, r] of SEATS) say(`${seat.padEnd(11)}: ${r.join('  →  ')}`);
 for (const p of keyCandidates()) say(`${existsSync(p) ? '✅' : '  '} candidate ${p}`);
 
 const available = new Set();
+let hasCredits = false;
 let failed = false;
 const fail = (s) => { failed = true; say(`❌ ${s}`); };
 
@@ -30,9 +31,13 @@ if (ROSTER.some(isKie)) {
   try {
     const { key, source } = resolveKieKeySource();
     say(`KIE key    : from ${source}`);
-    const credits = await kieCredits({ key });
-    if (hasKieCredits(credits)) say(`✅ KIE credits: ${credits} (shared by every model and every session on this key)`);
-    else fail(`KIE credits: ${JSON.stringify(credits)}. The gates need a positive balance, shared by every model and every session on this key.`);
+    // A failed balance call must not hide the model listing: keep the two verdicts separate.
+    try {
+      const credits = await kieCredits({ key });
+      hasCredits = hasKieCredits(credits);
+      if (hasCredits) say(`✅ KIE credits: ${credits} (shared by every model and every session on this key)`);
+      else fail(`KIE credits: ${JSON.stringify(credits)}. The gates need a positive balance, shared by every model and every session on this key.`);
+    } catch (e) { fail(`KIE credits: ${String(e.message).slice(0, 240)}`); }
     const ids = await listKieModels({ key });
     say(`✅ KIE listings -> ${ids.size} models (/openai/v1/models + /anthropic/v1/models)`);
     for (const m of ROSTER.filter(isKie)) {
@@ -44,7 +49,8 @@ if (ROSTER.some(isKie)) {
 
 const ping = (m) => askKie(m, { system: 'Answer briefly.', user: 'Reply with the single word: pong', maxTokens: 2000, effort: 'low' });
 
-if (live) {
+if (live && !hasCredits) say('--- live ping skipped: no usable balance ---');
+else if (live) {
   say('--- live ping (1 tiny real call per rostered model, one at a time) ---');
   for (const m of [...available]) {
     const t0 = Date.now();

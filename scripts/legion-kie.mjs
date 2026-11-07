@@ -71,11 +71,11 @@ async function readResponses(res, rosterModel) {
   let usage;
   let status = '';
   for await (const e of sseEvents(res, rosterModel)) {
-    if (e.type === 'response.output_text.delta') content += e.delta;
+    if (e.type === 'response.output_text.delta' && typeof e.delta === 'string') content += e.delta;
     if (e.type === 'error') throw new Error(`${rosterModel} stream error: ${JSON.stringify(e).slice(0, 200)}`);
     if (['response.completed', 'response.incomplete', 'response.failed'].includes(e.type)) {
       usage = e.response?.usage;
-      status = e.response?.status ?? e.type;
+      status = e.response?.status ?? e.type.replace('response.', '');
     }
   }
   if (status !== 'completed') throw new Error(`${rosterModel} ended with status "${status || 'no terminal event'}"`);
