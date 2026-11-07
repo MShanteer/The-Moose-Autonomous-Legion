@@ -175,6 +175,7 @@ own domain.
 
 - **Always stream.** KIE has no chat-completions route for GPT models, and a long unstreamed call dies as a Cloudflare 502.
 - **Claude on KIE answers 503 under parallel load** (measured: 1 of 8 concurrent calls got through, Sol 8 of 8). The client retries three times; run Claude calls one at a time. Claude Code agents do not run through KIE.
+- **Check which model answered.** The Muscle roster falls back to Claude, which is also the second lineage. The banner names the model; if both runs were Claude, the two families have not reviewed the change.
 - **The balance is shared** by every model and every session on the key, so a balance check is not a per-session cap.
 - **HTTP 402 stops the roster at once.** Every model draws on the same balance. Tell the owner; do not retry.
 - **Empty or cut output is not approval.** `max_tokens` covers reasoning plus content. The client treats empty content, a max-tokens cut and a dropped stream as failures, even when the text so far says `VERDICT: CLEAN`.

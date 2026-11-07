@@ -12,6 +12,8 @@ import { firstAssignment, keyCandidates } from './legion-key.mjs';
 const KIE = process.env.LEGION_KIE_URL?.replace(/\/$/, '') ?? 'https://api.kie.ai';
 // One attempt, including its whole stream. Long enough for a 60k-char diff, short enough to fall through.
 const TIMEOUT_MS = Number(process.env.LEGION_KIE_TIMEOUT_MS ?? 420_000);
+// legion:check must report a stalled gateway, not hang on it.
+const PREFLIGHT_TIMEOUT_MS = 30_000;
 // KIE's Claude models answer 503 under parallel load (measured 2026-11-05: 1 of 8 concurrent calls got through).
 const CLAUDE_503_DELAYS_MS = [8_000, 16_000, 24_000];
 const MAX_RETRY_AFTER_MS = 30_000;
@@ -150,7 +152,7 @@ export async function listKieModels(deps = {}) {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const key = deps.key ?? resolveKieKey();
   const list = async (path) => {
-    const res = await fetchImpl(`${KIE}${path}`, { headers: { authorization: `Bearer ${key}`, 'anthropic-version': '2023-06-01' } });
+    const res = await fetchImpl(`${KIE}${path}`, { headers: { authorization: `Bearer ${key}`, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout(PREFLIGHT_TIMEOUT_MS) });
     if (!res.ok) throw await httpError(path, res);
     const j = await res.json();
     if (!Array.isArray(j.data)) throw new Error(`${path} returned no model list`);
@@ -160,7 +162,7 @@ export async function listKieModels(deps = {}) {
 }
 
 export async function kieCredits(deps = {}) {
-  const res = await (deps.fetchImpl ?? fetch)(`${KIE}/api/v1/chat/credit`, { headers: { authorization: `Bearer ${deps.key ?? resolveKieKey()}` } });
+  const res = await (deps.fetchImpl ?? fetch)(`${KIE}/api/v1/chat/credit`, { headers: { authorization: `Bearer ${deps.key ?? resolveKieKey()}` }, signal: AbortSignal.timeout(PREFLIGHT_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`GET /api/v1/chat/credit → HTTP ${res.status}`);
   return (await res.json()).data;
 }
